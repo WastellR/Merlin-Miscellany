@@ -1,0 +1,24 @@
+{
+  "id": "active-lights",
+  "title": "Active Lights",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13"
+  },
+  "description": "<div><p><span style=\"color:#ce9178\"><span style=\"color:#cccccc;background-color:#1f1f1f;font-family:Consolas, 'Courier New', monospace;font-weight:normal;font-size:14px;line-height:19px;white-space:pre\">Adds trigger options to lights.</span></span></p></div>",
+  "authors": [
+    {
+      "name": "CORE Games",
+      "url": "https://merlinvtt.com",
+      "discord": "Robomoo#5070",
+      "flags": {}
+    }
+  ],
+  "scripts": [
+    "light-watcher.js"
+  ],
+  "flags": {
+    "canUpload": true
+  }
+}

@@ -15,6 +15,7 @@
       "flags": {}
     }
   ],
+  "socket": true,
   "scripts": [
     "light-watcher.js"
   ],

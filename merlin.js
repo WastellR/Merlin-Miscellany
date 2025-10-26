@@ -13,7 +13,7 @@ const WithActiveLightConfig = (LightConfig) => {
     static PARTS = {
       ...super.PARTS,
       advanced: {
-        template: "modules/merlins-miscellany/active-light-advanced.hbs"
+        template: "modules/merlins-miscellany/templates/active-light-advanced.hbs"
       }
     };
     
@@ -70,20 +70,98 @@ class Merlin{
 
   constructor() {
     Hooks.on("ready", this._onReady.bind(this));
+    Hooks.on("canvasReady", this._onCanvasReady.bind(this));
     Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
     Hooks.on("controlToken", this._onControlToken.bind(this));
     Hooks.on("updateToken", this._onUpdateToken.bind(this));
+    Hooks.on("getSceneControlButtons", this._getSceneControlButtons.bind(this));
   }
 
-  _onReady() {
+  // The scene control (left-side control buttons) that was previously active
+  prevActiveControl = "";
+  async _onReady() {
     console.log("Merlin Module | Ready");
 
     // Extend ambient light sheet class with our custom class
     CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls = WithActiveLightConfig(CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls);
 
+    const { WithActiveTileConfig } = await import("/modules/monks-active-tiles/apps/active-tile-config.js");
+    const oldSheetClass = CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls;
+    const ActiveTileConfig = WithActiveTileConfig(oldSheetClass);
+
+    // Declare our custom TileConfig class
+    const MerlinActiveTileConfig = (TileConfig) => {
+      class MerlinTileConfig extends ActiveTileConfig {
+        /** @override */
+        // Use our custom HTML instead
+        static PARTS = {
+          ...super.PARTS,
+          appearance: { template: "modules/merlins-miscellany/templates/appearance.hbs" }
+        };       
+
+        async _processSubmitData(event, form, submitData, options = {}) {
+          const isPOI = foundry.utils.getProperty(submitData.flags, "merlin.isPOI") ?? false;
+          super._processSubmitData(event, form, submitData, options);          
+          foundry.utils.setProperty(this.document.flags, "merlin.isPOI", isPOI);
+        }
+
+        /** @override */
+        getData(options) {
+          const data = super.getData(options);
+          data.source.flags = foundry.utils.mergeObject(data.source.flags ?? {}, {
+            "merlin": {
+              isPOI: this.document.getFlag("merlin", "isPOI") ?? "",
+            }
+          });
+          return data;
+        }
+        
+        // Remove the extra 'save template' button that gets added when we extend ActiveTileConfig
+        // for some fucking reason
+        async _prepareContext(options) {
+          const context = await super._prepareContext(options);
+          context.buttons.splice(0, 1);
+          return context;
+        }
+      }
+
+      Object.defineProperty(MerlinTileConfig.prototype.constructor, "name", { value: "MerlinTileConfig" });
+      return MerlinTileConfig;
+    };
+    
+    // Extend monk's tile sheet class with custom class
+    CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls = MerlinActiveTileConfig(oldSheetClass);
+
     if (game.user.isGM) {
       game.socket.on(`module.merlins-miscellany`, this._onSocket.bind(this));
     }
+
+    // Get the scene controls buttons. Add a call to update POI visibility whenever any of them is clicked.
+    const layersMenu = document.getElementById("scene-controls-layers");
+    if (layersMenu) {
+      // Find all buttons inside its list items
+      const buttons = layersMenu.querySelectorAll("button");
+
+      // Loop through each button and attach a click handler
+      buttons.forEach(button => {
+        button.addEventListener("click", event => {
+          if(this.prevActiveControl == "tiles"){
+            setTimeout(() => {
+              this._updatePOITilesVisibility();
+            }, 100);
+          }
+          // Optionally, get the data-control name (like 'tokens', 'tiles', etc.)
+          this.prevActiveControl = button.dataset.control;
+        });
+      });
+    }
+  }
+
+  _onCanvasReady(canvas) {
+    console.log("Merlin | Canvas Ready");
+    setTimeout(() => {
+      this._updatePOITilesVisibility();
+    }, 100);    
   }
 
   // Watch for light updates
@@ -143,6 +221,47 @@ class Merlin{
   _onUpdateToken(scene, tokenData, updateData, options, userId) {
     if (updateData._movement?.[tokenData._id]) {
       this.prevMovementMap.set(tokenData._id, updateData._movement[tokenData._id]);
+    }
+  }
+
+  userPOIVisibility = {};
+  _getSceneControlButtons(controls){
+    // Add our toggle button to the tools array
+    const button = {
+      name: "toggleCustomNote",
+      title: "Toggle Points of Interest",
+      icon: "fas fa-eye",
+      toggle: true, // allows Foundry to treat it like a toggle button
+      active: this.userPOIVisibility[game.userId] ?? false,
+      onClick: (toggle) => {
+        // Flip the local variable for this user
+        this.userPOIVisibility[game.userId] = toggle;
+        console.log("Merlin | " + (toggle ? "Showing" : "Hiding") + " Point of Interest Tiles");
+        this._updatePOITilesVisibility();
+      },
+      button: true
+    };
+    controls.tokens.tools[button.name] = button;
+  }
+
+  // Update the local visibility of all POI tiles in scene depending on user setting
+  async _updatePOITilesVisibility(){
+    const shouldShow = this.userPOIVisibility[game.userId] ?? false;
+    for (let tileDoc of canvas.scene.tiles) {
+      if(tileDoc.flags?.["merlin"]?.isPOI ?? false){
+        async function toggleTile() {
+          const tile = await canvas.tiles.get(tileDoc._id);
+          if(!tile.mesh){
+            setTimeout(() => {
+              toggleTile();
+            }, 0);
+          }
+          else{
+            tile.mesh.alpha = shouldShow ? 1 : 0;
+          }
+        }
+        toggleTile();
+      }
     }
   }
 

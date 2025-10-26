@@ -15,8 +15,17 @@
       "flags": {}
     }
   ],
+  "relationships": {
+    "requires": [
+      {
+        "id": "monks-active-tiles",
+        "type": "module",
+        "compatibility": {}
+      }
+    ]
+  },
   "socket": true,
-  "scripts": [
+  "esmodules": [
     "merlin.js"
   ],
   "flags": {

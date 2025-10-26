@@ -17,7 +17,7 @@
   ],
   "socket": true,
   "scripts": [
-    "light-watcher.js"
+    "merlin.js"
   ],
   "flags": {
     "canUpload": true

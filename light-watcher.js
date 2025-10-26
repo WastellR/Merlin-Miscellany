@@ -145,6 +145,83 @@ class Merlin{
       this.prevMovementMap.set(tokenData._id, updateData._movement[tokenData._id]);
     }
   }
+
+  _onSocket(data) {
+    if (!game.user.isGM) return;
+
+    if (data.action === "teleportToken") {
+      this.#teleportTokenToTile(data.sourceSceneId, data.targetSceneId, data.targetTileId, data.tokenId);
+    }
+  }
+
+  // Set of tokens currently being teleported
+  teleportingTokenIds = new Set();
+  // Teleports a token to a tile
+  // Wrapper selects client or server call
+  teleportTokenToTile(sourceSceneId, targetSceneId, targetTileId, tokenId) {
+    if (game.user.isGM) {
+      console.log('Merlin | Teleporting token directly as GM');
+      this.#teleportTokenToTile(sourceSceneId, targetSceneId, targetTileId, tokenId);
+    } else {
+      console.log('Merlin | Requesting token teleport via socket');
+      game.socket.emit("module.merlins-miscellany", {
+        action: "teleportToken",
+        sourceSceneId,
+        targetSceneId,
+        targetTileId,
+        tokenId
+      });
+    }
+  }  
+  // Internal implementation
+  async #teleportTokenToTile(sourceSceneId, targetSceneId, targetTileId, tokenId) {
+    if(this.teleportingTokenIds.has(tokenId)){
+      return;
+    }
+    this.teleportingTokenIds.add(tokenId);
+
+    const sourceScene = game.scenes.get(sourceSceneId);
+    const targetScene = game.scenes.get(targetSceneId);
+    const targetTile = targetScene.tiles.get(targetTileId);
+    const token = sourceScene.tokens.get(tokenId);
+
+    const snapped = targetScene.grid.getSnappedPosition(targetTile.x, targetTile.y, 1);
+    
+    // Duplicate the token document
+    const duplToken = foundry.utils.duplicate(token);
+    duplToken.x = snapped.x - duplToken.width / 2;
+    duplToken.y = snapped.y - duplToken.height / 2;
+    
+    const created = await targetScene.createEmbeddedDocuments("Token", [duplToken]);  
+
+    // For any users controlling the original token, pull them to the new scene
+    const actor = game.actors.get(duplToken.actorId);
+    const owners = actor ? game.users.filter(u => actor.testUserPermission(u, "OWNER")) : [];
+    await owners.forEach(user => {
+      if(!(user.isGM && !this.GMControlledTokenIds.has(tokenId))){
+        // Players will keep control of their token automatically.
+        // GMs need to manually take control of the new token after the canvas is loaded.
+        if(user.isGM){
+          Hooks.once("canvasReady", (canvas) => {
+            const newToken = canvas.tokens.get(created[0]._id);
+            newToken.control();
+          });
+        }
+        game.socket.emit("pullToScene", targetScene.id, user.id);
+      }
+    })
+
+    token.delete();
+
+    // Clear multilevel tokens of replicated player tokens
+    setTimeout(() => {
+      game.multilevel.refreshAll();
+    }, 100);
+
+    this.teleportingTokenIds.delete(tokenId);
+  }
+}
+
 // Register our hook + sheet override
 Hooks.once("init", () => {
   console.log("Merlin Module | Initializing");

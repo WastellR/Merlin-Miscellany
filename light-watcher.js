@@ -66,27 +66,30 @@ const WithActiveLightConfig = (LightConfig) => {
   return ActiveLightConfig;
 };
 
-// Register our hook + sheet override
-Hooks.once("init", () => {
-  console.log("Merlin Module | Initializing");
+class Merlin{
 
-  // Replace the default sheet for AmbientLight
-  CONFIG.AmbientLight.sheetClasses.base = LightWatcherConfig;
-});
+  constructor() {
+    Hooks.on("ready", this._onReady.bind(this));
+    Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
+  }
 
-Hooks.once("ready", () => {
-  console.log("Merlin Module | Ready");
+  _onReady() {
+    console.log("Merlin Module | Ready");
 
-  // Extend ambient light sheet class with our custom class
-  CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls = WithActiveLightConfig(CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls);
+    // Extend ambient light sheet class with our custom class
+    CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls = WithActiveLightConfig(CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls);
+
+    if (game.user.isGM) {
+      game.socket.on(`module.merlins-miscellany`, this._onSocket.bind(this));
+    }
+  }
 
   // Watch for light updates
-  Hooks.on("updateAmbientLight", async (doc, changes, options, userId) => {
+  async _onUpdateLight(doc, changes, options, userId){
     if (!("hidden" in changes)) return;
 
     const state = doc.hidden ? "OFF" : "ON";
     console.log(`Merlin | Light [${doc.id}] toggled ${state}`);
-    console.log(doc);
 
     // Run custom code if provided
     const code = doc.flags.merlin.runCode;
@@ -112,12 +115,13 @@ Hooks.once("ready", () => {
           id = id.slice(1);
         }
         const tile = canvas.tiles.get(id);
-        console.log('id', id);
         if (tile) {
           await tile.document.update({ alpha: (doc.hidden == inverted ? 1 : 0), hidden: false });
-          console.log(tile);
         }
       }
     }
-  });
+// Register our hook + sheet override
+Hooks.once("init", () => {
+  console.log("Merlin Module | Initializing");
+  game.merlin = new Merlin();
 });

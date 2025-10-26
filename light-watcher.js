@@ -13,7 +13,7 @@ const WithActiveLightConfig = (LightConfig) => {
     static PARTS = {
       ...super.PARTS,
       advanced: {
-        template: "modules/active-lights/active-light-advanced.hbs"
+        template: "modules/merlins-miscellany/active-light-advanced.hbs"
       }
     };
     

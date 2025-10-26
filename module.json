@@ -1,12 +1,12 @@
 {
-  "id": "active-lights",
-  "title": "Active Lights",
+  "id": "merlins-miscellany",
+  "title": "Merlin's Miscellany",
   "version": "1.0.0",
   "compatibility": {
     "minimum": "13",
     "verified": "13"
   },
-  "description": "<div><p><span style=\"color:#ce9178\"><span style=\"color:#cccccc;background-color:#1f1f1f;font-family:Consolas, 'Courier New', monospace;font-weight:normal;font-size:14px;line-height:19px;white-space:pre\">Adds trigger options to lights.</span></span></p></div>",
+  "description": "<div><p><span style=\"color:#ce9178\"><span style=\"color:#cccccc;background-color:#1f1f1f;font-family:Consolas, 'Courier New', monospace;font-weight:normal;font-size:14px;line-height:19px;white-space:pre\">Various utility functions used by Merlin's Maps.</span></span></p></div>",
   "authors": [
     {
       "name": "CORE Games",

@@ -71,6 +71,8 @@ class Merlin{
   constructor() {
     Hooks.on("ready", this._onReady.bind(this));
     Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
+    Hooks.on("controlToken", this._onControlToken.bind(this));
+    Hooks.on("updateToken", this._onUpdateToken.bind(this));
   }
 
   _onReady() {
@@ -120,6 +122,29 @@ class Merlin{
         }
       }
     }
+  }
+
+  // Supposed to keep track of tokens controlled by the primary GM
+  // But not sure how it will interact with additional GMs who can also control tokens
+  GMControlledTokenIds = new Set();
+  _onControlToken(token, controlled) {
+    console.log('Merlin | Token control changed', token.document._id, controlled);
+    if (controlled) {
+      if (game.user.isGM) {
+        this.GMControlledTokenIds.add(token.document._id);
+      }
+    } else {
+      this.GMControlledTokenIds.delete(token.document._id);
+    }
+  }
+
+  // Store the previous movement of each token when it updates
+  prevMovementMap = new Map();
+  _onUpdateToken(scene, tokenData, updateData, options, userId) {
+    if (updateData._movement?.[tokenData._id]) {
+      this.prevMovementMap.set(tokenData._id, updateData._movement[tokenData._id]);
+    }
+  }
 // Register our hook + sheet override
 Hooks.once("init", () => {
   console.log("Merlin Module | Initializing");

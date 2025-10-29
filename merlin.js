@@ -217,9 +217,18 @@ class Merlin{
   }
 
   // Store the previous movement of each token when it updates
+  // This is mainly so that clients can get an accurate movement origin for selective tile triggers
   prevMovementMap = new Map();
   _onUpdateToken(scene, tokenData, updateData, options, userId) {
     if (updateData._movement?.[tokenData._id]) {
+      // We mark a new token as no longer 'freshly teleported' the first time it moves
+      const movement = updateData._movement[tokenData._id];
+      if(this.prevMovementMap.has(tokenData._id)
+        && (movement.destination.x !== movement.origin.x
+          || movement.destination.y !== movement.origin.y)){
+        this.teleportedTokenIds.delete(tokenData._id);
+      }
+      // Store previous movement
       this.prevMovementMap.set(tokenData._id, updateData._movement[tokenData._id]);
     }
   }
@@ -275,6 +284,8 @@ class Merlin{
 
   // Set of tokens currently being teleported
   teleportingTokenIds = new Set();
+  // Set of tokens just been teleported and not yet moved
+  teleportedTokenIds = new Set();
   // Teleports a token to a tile
   // Wrapper selects client or server call
   teleportTokenToTile(sourceSceneId, targetSceneId, targetTileId, tokenId) {
@@ -294,7 +305,11 @@ class Merlin{
   }  
   // Internal implementation
   async #teleportTokenToTile(sourceSceneId, targetSceneId, targetTileId, tokenId) {
+    // Checks to stop teleporting on arrival loops
     if(this.teleportingTokenIds.has(tokenId)){
+      return;
+    }    
+    if(this.teleportedTokenIds.has(tokenId)){
       return;
     }
     this.teleportingTokenIds.add(tokenId);
@@ -334,10 +349,13 @@ class Merlin{
 
     // Clear multilevel tokens of replicated player tokens
     setTimeout(() => {
-      game.multilevel.refreshAll();
+      if(game.modules.has("multilevel")){
+        game.multilevel.refreshAll();
+      }
     }, 100);
 
     this.teleportingTokenIds.delete(tokenId);
+    this.teleportedTokenIds.add(created[0]._id);
   }
 }
 

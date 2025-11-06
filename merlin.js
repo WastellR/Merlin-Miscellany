@@ -223,9 +223,8 @@ class Merlin{
     if (updateData._movement?.[tokenData._id]) {
       // We mark a new token as no longer 'freshly teleported' the first time it moves
       const movement = updateData._movement[tokenData._id];
-      if(this.prevMovementMap.has(tokenData._id)
-        && (movement.destination.x !== movement.origin.x
-          || movement.destination.y !== movement.origin.y)){
+      if(movement.destination.x !== movement.origin.x
+          || movement.destination.y !== movement.origin.y){
         this.teleportedTokenIds.delete(tokenData._id);
       }
       // Store previous movement

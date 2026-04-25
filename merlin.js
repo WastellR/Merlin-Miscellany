@@ -333,6 +333,9 @@ class Merlin{
     if (data.action === "teleportToken") {
       this.#teleportTokenToTile(data.sourceSceneId, data.targetSceneId, data.targetTileId, data.tokenId);
     }
+    else if (data.action === "teleportTokenRelative") {
+      this.#teleportTokenToTileRelative(data.sourceSceneId, data.sourceTileId, data.targetSceneId, data.targetTileId, data.tokenId);
+    }
   }
 
   // Set of tokens currently being teleported
@@ -356,8 +359,47 @@ class Merlin{
       });
     }
   }  
+  teleportTokenToTileRelative(sourceSceneId, sourceTileId, targetSceneId, targetTileId, tokenId) {
+    if (game.user.isGM) {
+      console.log('Merlin | Teleporting token directly as GM');
+      this.#teleportTokenToTileRelative(sourceSceneId, sourceTileId, targetSceneId, targetTileId, tokenId);
+    } else {
+      console.log('Merlin | Requesting token teleport via socket');
+      game.socket.emit("module.merlins-miscellany", {
+        action: "teleportTokenRelative",
+        sourceSceneId,
+        sourceTileId,
+        targetSceneId,
+        targetTileId,
+        tokenId
+      });
+    }
+  }
+
   // Internal implementation
   async #teleportTokenToTile(sourceSceneId, targetSceneId, targetTileId, tokenId) {
+    const targetScene = game.scenes.get(targetSceneId);
+    const targetTile = targetScene.tiles.get(targetTileId);
+    const snapped = targetScene.grid.getSnappedPosition(targetTile.x, targetTile.y, 1);
+    
+    this.#teleportTokenToPosition(sourceSceneId,targetSceneId, snapped, tokenId);
+  }
+
+   async #teleportTokenToTileRelative(sourceSceneId, sourceTileId, targetSceneId, targetTileId, tokenId) {
+    const sourceScene = game.scenes.get(sourceSceneId);
+    const sourceTile = sourceScene.tiles.get(sourceTileId);
+    const targetScene = game.scenes.get(targetSceneId);
+    const targetTile = targetScene.tiles.get(targetTileId);
+    const token = sourceScene.tokens.get(tokenId);
+
+    const relativeX = token.x - sourceTile.x;
+    const relativeY = token.y - sourceTile.y;
+    const snapped = targetScene.grid.getSnappedPosition(targetTile.x + relativeX, targetTile.y + relativeY, 1);
+    
+    this.#teleportTokenToPosition(sourceSceneId,targetSceneId, snapped, tokenId);
+  }
+
+  async #teleportTokenToPosition(sourceSceneId, targetSceneId, targetPosition, tokenId) {
     // Checks to stop teleporting on arrival loops
     if(this.teleportingTokenIds.has(tokenId)){
       return;
@@ -369,15 +411,12 @@ class Merlin{
 
     const sourceScene = game.scenes.get(sourceSceneId);
     const targetScene = game.scenes.get(targetSceneId);
-    const targetTile = targetScene.tiles.get(targetTileId);
     const token = sourceScene.tokens.get(tokenId);
 
-    const snapped = targetScene.grid.getSnappedPosition(targetTile.x, targetTile.y, 1);
-    
     // Duplicate the token document
     const duplToken = foundry.utils.duplicate(token);
-    duplToken.x = snapped.x - duplToken.width / 2;
-    duplToken.y = snapped.y - duplToken.height / 2;
+    duplToken.x = targetPosition.x - duplToken.width / 2;
+    duplToken.y = targetPosition.y - duplToken.height / 2;
     
     const created = await targetScene.createEmbeddedDocuments("Token", [duplToken]);  
 

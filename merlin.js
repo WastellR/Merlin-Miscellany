@@ -157,11 +157,65 @@ class Merlin{
     }
   }
 
-  _onCanvasReady(canvas) {
+  async _onCanvasReady(canvas) {
     console.log("Merlin | Canvas Ready");
     setTimeout(() => {
       this._updatePOITilesVisibility();
-    }, 100);    
+    }, 100);
+
+    // Automatic thumbnail regeneration
+    const scene = canvas.scene;
+    if (!scene) return;
+
+    const thumb = scene.thumb;
+    if(await this._isValidFilePath(thumb)) return;
+    if (this._regenInProgress) return;
+    this._regenInProgress = true;
+
+    console.warn(`Invalid thumbnail detected for scene "${scene.name}", "${scene.thumb}", regenerating all...`);
+
+    try {
+      let count = 0;
+      for (let s of game.scenes) {
+        if(await this._isValidFilePath(s.thumb)) continue;
+        const t = await s.createThumbnail();
+        await s.update({ thumb: t.thumb });
+        count++;
+      }
+
+      if(count > 0) {
+        ui.notifications.info("All missing scene thumbnails regenerated.");
+      }
+    } catch (err) {
+      console.error("Thumbnail regeneration failed:", err);
+    } finally {
+      this._regenInProgress = false;
+    }
+  }
+
+  async _isValidFilePath(path) {
+    if (!path || typeof path !== "string") return false;
+
+    // Ignore base64 thumbnails (these are always "valid")
+    if (path.startsWith("data:image")) return true;
+
+    try {
+      // Split into directory + filename
+      const parts = path.split("/");
+      const filename = parts.pop();
+      const dir = parts.join("/");
+
+      // Determine source (data/public/s3)
+      const source = dir.startsWith("systems") || dir.startsWith("modules") || dir.startsWith("icons")
+        ? "public"
+        : "data";
+
+      const result = await FilePicker.browse(source, dir);
+
+      return result.files.some(f => f.endsWith(filename));
+    } catch (e) {
+      return false;
+    }
   }
 
   // Watch for light updates

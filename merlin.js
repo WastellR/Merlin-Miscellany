@@ -77,6 +77,8 @@ class Merlin{
     Hooks.on("getSceneControlButtons", this._getSceneControlButtons.bind(this));
   }
 
+  usersUseMerlinVideo = {};
+  
   // The scene control (left-side control buttons) that was previously active
   prevActiveControl = "";
   async _onReady() {
@@ -287,9 +289,18 @@ class Merlin{
   }
 
   userPOIVisibility = {};
-  _getSceneControlButtons(controls){
+  // The weather and time settings for this scene, if any
+  sceneMerlinWeather = {};
+  sceneMerlinTime = {};
+  // Map of keys to filenames
+  sceneBackgroundFilenames = {};
+  sceneForegroundFilenames = {};
+  currentBackgroundInfo = {};
+  
+  async _getSceneControlButtons(controls){
+    console.log("Merlin | Adding scene control buttons", controls);
     // Add our toggle button to the tools array
-    const button = {
+    const poiButton = {
       name: "toggleCustomNote",
       title: "Toggle Points of Interest",
       icon: "fas fa-eye",
@@ -303,7 +314,239 @@ class Merlin{
       },
       button: true
     };
-    controls.tokens.tools[button.name] = button;
+    controls.tokens.tools[poiButton.name] = poiButton;
+
+    // Split into directory + filename
+    if(!canvas.scene) return;
+    const backgroundPath = canvas.scene.background.src;
+    const parts = backgroundPath.split("/");
+    const filename = parts.pop();
+    const dir = parts.join("/");
+    const backgroundInfo = this._getBackgroundTypeFromFilename(filename);
+
+    let hasStatic = !backgroundInfo.isVideo;
+    let hasAnimated = backgroundInfo.isVideo;
+    const hasWeatherTypes = new Set();
+    hasWeatherTypes.add(backgroundInfo.weather);
+    const hasTimes = new Set();
+    hasTimes.add(backgroundInfo.time);
+    this.sceneBackgroundFilenames = {};
+    this.sceneForegroundFilenames = {};
+    let key = this._getKeyFromBackgroundInfo(backgroundInfo);
+    this.sceneBackgroundFilenames[key] = backgroundPath;
+    let fileBackgroundInfos = {};
+    fileBackgroundInfos[key] = backgroundInfo;
+
+    // Get all files in directory that share the same stem    
+    const result = await foundry.applications.apps.FilePicker.browse("data", dir);
+    const filenames = result.files.map(path => path.split("/").pop());
+    
+    for(let f of filenames){      
+      if(f === filename) continue;
+      const fBackgroundInfo = this._getBackgroundTypeFromFilename(f);
+      if(fBackgroundInfo.stem === backgroundInfo.stem){
+        if(fBackgroundInfo.isFG) {
+          this.sceneForegroundFilenames[this._getKeyFromBackgroundInfo(fBackgroundInfo)] = dir + "/" + f;
+          continue;
+        }
+        hasStatic |= !fBackgroundInfo.isVideo;
+        hasAnimated |= fBackgroundInfo.isVideo;
+        if(fBackgroundInfo.weather) hasWeatherTypes.add(fBackgroundInfo.weather);
+        if(fBackgroundInfo.time) hasTimes.add(fBackgroundInfo.time);
+
+        key = this._getKeyFromBackgroundInfo(fBackgroundInfo);
+        if(!this.sceneBackgroundFilenames[key]
+          || (!fBackgroundInfo.miscSuffix && fileBackgroundInfos[key].miscSuffix)
+        ){
+          this.sceneBackgroundFilenames[key] = dir + "/" + f;
+          fileBackgroundInfos[key] = fBackgroundInfo;
+        }
+      }
+    }
+    // Create a mapping of fallback foregrounds for each background, prioritizing same weather and time, then same time, then same weather, then any
+    if(Object.keys(this.sceneForegroundFilenames).length > 1){
+      let sceneForegroundFallbacks = {};
+      for(let key in this.sceneBackgroundFilenames){
+        const bgInfo = this._getBackgroundTypeFromFilename(this.sceneBackgroundFilenames[key].split("/").pop());
+        let fgPath = null;
+        if(this.sceneForegroundFilenames[key]){
+          fgPath = this.sceneForegroundFilenames[key];
+        }
+        else{
+          const sameWeatherTimeKey = this._getKeyFromBackgroundInfo(bgInfo);
+          const sameTimeKey = this._getKeyFromBackgroundInfo({ ...bgInfo, weather: "none" });
+          const sameWeatherKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day" });
+          const sameWeatherTimeVideoKey = this._getKeyFromBackgroundInfo( bgInfo, {isVideo: !bgInfo.isVideo});
+          const sameTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, weather: "none", isVideo: !bgInfo.isVideo });
+          const sameWeatherVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day", isVideo: !bgInfo.isVideo });
+          fgPath = this.sceneForegroundFilenames[sameWeatherTimeKey] || this.sceneForegroundFilenames[sameTimeKey] || this.sceneForegroundFilenames[sameWeatherKey] 
+            || this.sceneForegroundFilenames[sameWeatherTimeVideoKey] || this.sceneForegroundFilenames[sameTimeVideoKey] || this.sceneForegroundFilenames[sameWeatherVideoKey]
+            || Object.values(this.sceneForegroundFilenames)[0] || null;
+        }
+        sceneForegroundFallbacks[key] = fgPath;
+      }
+      this.sceneForegroundFilenames = sceneForegroundFallbacks;
+    }
+
+    // Determine target background for this scene
+    if(!this.sceneMerlinWeather[canvas.scene.id]){
+      this.sceneMerlinWeather[canvas.scene.id] = backgroundInfo.weather;
+    }
+    this.currentBackgroundInfo.weather = this.sceneMerlinWeather[canvas.scene.id];
+    if(!this.sceneMerlinTime[canvas.scene.id]){
+      this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
+    }
+    this.currentBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
+    this.currentBackgroundInfo.isVideo = this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo;
+    // Attempt to switch to it if we have a suitable background, else fall back to the current background
+    const targetKey = this._getKeyFromBackgroundInfo(this.currentBackgroundInfo);
+    if(this.sceneBackgroundFilenames[targetKey]){
+      let object = { background: { src: this.sceneBackgroundFilenames[targetKey] } };
+      if(this.sceneForegroundFilenames[targetKey]){
+        object.foreground = this.sceneForegroundFilenames[targetKey];
+      }
+      await canvas.scene.update(object);
+    }
+    else{
+      this.currentBackgroundInfo = backgroundInfo;
+    }
+
+    if(hasAnimated && hasStatic){
+      const videoButton = {
+        name: "toggleMerlinVideo",
+        title: "Toggle Animated Background",
+        icon: "fas fa-video",
+        toggle: true, // allows Foundry to treat it like a toggle button
+        active: this.usersUseMerlinVideo[game.userId] ?? false,
+        onClick: (toggle) => {
+          // Flip the local variable for this user
+          this.usersUseMerlinVideo[game.userId] = !this.usersUseMerlinVideo[game.userId];
+          // Save settings
+          game.settings.set("merlins-miscellany", "usersUseMerlinVideo", this.usersUseMerlinVideo);
+          toggle = this.usersUseMerlinVideo[game.userId];
+          console.log("Merlin | " + "Switching to " + (toggle ? "animated" : "static") + " backgrounds.");
+
+          let desiredBackgroundInfo = this.currentBackgroundInfo;
+          desiredBackgroundInfo.isVideo = toggle;
+          this._updateBackground(desiredBackgroundInfo);
+        },
+        button: true
+      };
+      controls.lighting.tools[videoButton.name] = videoButton;
+    }
+    
+    if(hasWeatherTypes.size > 1){
+      const weatherSelect = {
+        name: "selectMerlinWeather",
+        title: "Toggle Rain",
+        icon: "fas fa-cloud-rain",
+        toggle: true, 
+        active: this.currentBackgroundInfo.weather === "rain" ?? false,
+        onClick: (toggle) => {
+          let desiredBackgroundInfo = this.currentBackgroundInfo;
+          desiredBackgroundInfo.weather = this.currentBackgroundInfo.weather === "rain" ? "none" : "rain";
+          console.log("Merlin | " + "Switching weather to " + desiredBackgroundInfo.weather);
+          if(this._updateBackground(desiredBackgroundInfo)){
+            this.sceneMerlinWeather[canvas.scene.id] = desiredBackgroundInfo.weather;
+          }
+        }
+      };
+      controls.lighting.tools[weatherSelect.name] = weatherSelect;
+    }
+
+    if(hasTimes.size > 1){
+      const timeSelect = {
+        name: "selectMerlinTime",
+        title: "Switch Time of Day",
+        icon: "fas fa-sun",
+        toggle: true,
+        active: this.currentBackgroundInfo.time === "day" ?? false,
+        onClick: (toggle) => {
+          let desiredBackgroundInfo = this.currentBackgroundInfo;
+          desiredBackgroundInfo.time = this.currentBackgroundInfo.time === "day" ? "night" : "day";
+          console.log("Merlin | " + "Switching time to " + desiredBackgroundInfo.time);
+          if(this._updateBackground(desiredBackgroundInfo)){
+            this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;
+          }
+        }
+      };
+      controls.lighting.tools[timeSelect.name] = timeSelect;
+    }
+
+    // Refresh controls UI after background reload.
+    if(controls.lighting.active){
+      const button = document.querySelector(
+        'button[data-control="tokens"]'
+      );
+      const button2 = document.querySelector(
+        'button[data-control="lighting"]'
+      );
+      if (button && button2) {
+        button.click();
+        button2.click();
+      }
+    }
+  }
+
+  _getBackgroundTypeFromFilename(filename){
+    const ext = filename.split('.').pop().toLowerCase();
+    const base = filename.substring(0, filename.lastIndexOf('.'));
+    // Simple heuristic: if it's a video format, treat it as animated. Otherwise static.
+    const videoFormats = ["mp4", "webm", "ogg"];
+    const weatherTypes = ["none", "rain"];
+    const times = ["day", "night", "dusk", "dawn"];
+    
+    const parts = base.split("_");
+    const stem = parts.slice(0, Math.max(1, parts.length-3)).join("_");
+    const suffixes = parts.slice(Math.max(1, parts.length-3), parts.length);
+    let weatherType = "none";
+    let time = "day";
+    let isFG = false;
+    let miscSuffix = false;
+    for(let s of suffixes){
+      s = s.toLowerCase();      
+      if(weatherTypes.includes(s)){
+        weatherType = s;
+      }
+      else if(times.includes(s)){
+        time = s;
+      }
+      else if(s === "fg"){
+        isFG = true;
+      }
+      else{
+        miscSuffix = true;
+      }
+    }
+    
+    return { 
+      isVideo: videoFormats.includes(ext),
+      isFG: isFG,
+      weather: weatherType,
+      time: time,
+      miscSuffix: miscSuffix,
+      stem: stem,
+      ext: ext
+    }
+  }
+
+  _getKeyFromBackgroundInfo(backgroundInfo){
+    return `${backgroundInfo.isVideo}_${backgroundInfo.weather}_${backgroundInfo.time}`;
+  }
+
+  async _updateBackground(backgroundInfo){
+    const targetKey = this._getKeyFromBackgroundInfo(backgroundInfo);
+    if(this.sceneBackgroundFilenames[targetKey]){      
+      let object = { background: { src: this.sceneBackgroundFilenames[targetKey] } };
+      if(this.sceneForegroundFilenames[targetKey]){
+        object.foreground = this.sceneForegroundFilenames[targetKey];
+      }
+      await canvas.scene.update(object);
+
+      this.currentBackgroundInfo = backgroundInfo;
+      return true;
+    }
+    return false;
   }
 
   // Update the local visibility of all POI tiles in scene depending on user setting
@@ -455,4 +698,14 @@ class Merlin{
 Hooks.once("init", () => {
   console.log("Merlin Module | Initializing");
   game.merlin = new Merlin();
+
+  game.settings.register("merlins-miscellany", "usersUseMerlinVideo", {
+    name: "Users Use Merlin Video",
+    hint: "Users' use Merlin video preference.",
+    scope: "client",
+    config: false,
+    type: Object,
+    default: {}
+  });
+  game.merlin.usersUseMerlinVideo = game.settings.get("merlins-miscellany", "usersUseMerlinVideo");
 });

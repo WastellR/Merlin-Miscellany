@@ -296,6 +296,7 @@ class Merlin{
   sceneBackgroundFilenames = {};
   sceneForegroundFilenames = {};
   currentBackgroundInfo = {};
+  activeLevel = null;
   
   async _getSceneControlButtons(controls){
     console.log("Merlin | Adding scene control buttons", controls);
@@ -318,7 +319,13 @@ class Merlin{
 
     // Split into directory + filename
     if(!canvas.scene) return;
-    const backgroundPath = canvas.scene.background.src;
+    let backgroundPath = canvas.scene.background.src;
+    this.activeLevel = null;
+    // Handle multilevel scenes in 14+
+    if(game.version >= 14){
+      this.activeLevel = canvas.scene.levels.get(canvas.scene._view);
+      backgroundPath = this.activeLevel?.background?.src;
+    }
     const parts = backgroundPath.split("/");
     const filename = parts.pop();
     const dir = parts.join("/");
@@ -399,16 +406,8 @@ class Merlin{
     this.currentBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
     this.currentBackgroundInfo.isVideo = this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo;
     // Attempt to switch to it if we have a suitable background, else fall back to the current background
-    const targetKey = this._getKeyFromBackgroundInfo(this.currentBackgroundInfo);
-    if(this.sceneBackgroundFilenames[targetKey]){
-      let object = { background: { src: this.sceneBackgroundFilenames[targetKey] } };
-      if(this.sceneForegroundFilenames[targetKey]){
-        object.foreground = this.sceneForegroundFilenames[targetKey];
-      }
-      await canvas.scene.update(object);
-    }
-    else{
-      this.currentBackgroundInfo = backgroundInfo;
+    if(!this._updateBackground(this.currentBackgroundInfo)){
+       this.currentBackgroundInfo = backgroundInfo;
     }
 
     if(hasAnimated && hasStatic){
@@ -541,7 +540,12 @@ class Merlin{
       if(this.sceneForegroundFilenames[targetKey]){
         object.foreground = this.sceneForegroundFilenames[targetKey];
       }
-      await canvas.scene.update(object);
+      if(game.version >= 14){
+        this.activeLevel.update(object);
+      }
+      else{
+        await canvas.scene.update(object);
+      }
 
       this.currentBackgroundInfo = backgroundInfo;
       return true;

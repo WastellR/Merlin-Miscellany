@@ -433,6 +433,27 @@ class Merlin{
       };
       controls.lighting.tools[videoButton.name] = videoButton;
     }
+
+    if(hasTimes.size > 1){
+      const timeSelect = {
+        name: "selectMerlinTime",
+        title: this.currentBackgroundInfo.time === "day" ? "Switch To Night" : "Switch To Day",
+        icon: this.currentBackgroundInfo.time === "day" ? "fas fa-moon" : "fas fa-sun",
+        onClick: (toggle) => {
+          let desiredBackgroundInfo = this.currentBackgroundInfo;
+          desiredBackgroundInfo.time = this.currentBackgroundInfo.time === "day" ? "night" : "day";
+          console.log("Merlin | " + "Switching time to " + desiredBackgroundInfo.time);
+          if(this._updateBackground(desiredBackgroundInfo)){
+            this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;
+          }
+        }
+      };
+      controls.lighting.tools[timeSelect.name] = timeSelect;
+
+      // Hide default day/night controls
+      delete controls.lighting.tools.day;
+      delete controls.lighting.tools.night;
+    }
     
     if(hasWeatherTypes.size > 1){
       const weatherSelect = {
@@ -451,25 +472,6 @@ class Merlin{
         }
       };
       controls.lighting.tools[weatherSelect.name] = weatherSelect;
-    }
-
-    if(hasTimes.size > 1){
-      const timeSelect = {
-        name: "selectMerlinTime",
-        title: "Switch Time of Day",
-        icon: "fas fa-sun",
-        toggle: true,
-        active: this.currentBackgroundInfo.time === "day" ?? false,
-        onClick: (toggle) => {
-          let desiredBackgroundInfo = this.currentBackgroundInfo;
-          desiredBackgroundInfo.time = this.currentBackgroundInfo.time === "day" ? "night" : "day";
-          console.log("Merlin | " + "Switching time to " + desiredBackgroundInfo.time);
-          if(this._updateBackground(desiredBackgroundInfo)){
-            this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;
-          }
-        }
-      };
-      controls.lighting.tools[timeSelect.name] = timeSelect;
     }
 
     // Refresh controls UI after background reload.

@@ -134,9 +134,7 @@ class Merlin{
     // Extend monk's tile sheet class with custom class
     CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls = MerlinActiveTileConfig(oldSheetClass);
 
-    if (game.user.isGM) {
-      game.socket.on(`module.merlins-miscellany`, this._onSocket.bind(this));
-    }
+    game.socket.on(`module.merlins-miscellany`, this._onSocket.bind(this));
 
     // Get the scene controls buttons. Add a call to update POI visibility whenever any of them is clicked.
     const layersMenu = document.getElementById("scene-controls-layers");
@@ -164,6 +162,19 @@ class Merlin{
     setTimeout(() => {
       this._updatePOITilesVisibility();
     }, 100);
+
+    if(!game.user.isGM) return;
+
+    // If this scene has a fog mask configured, seed every user's fog the first time it is encountered.
+    const fogMaskPath = canvas.scene?.flags?.merlin?.fogMask;
+    if (game.user.isGM && fogMaskPath) {
+      try {
+        await this.seedInitialFogMaskForScene(canvas.scene, fogMaskPath, false, false);
+      } catch (err) {
+        console.error("Merlin | Failed to seed scene fog mask:", err);
+        ui.notifications.error(`Merlin: Failed to initialize fog mask for scene "${canvas.scene.name}".`);
+      }
+    }
 
     // Automatic thumbnail regeneration
     const scene = canvas.scene;
@@ -218,6 +229,99 @@ class Merlin{
     } catch (e) {
       return false;
     }
+  }
+
+  /**
+   * Define a fog mask for a Scene and seed every user's FogExploration the first time they connect.
+   * White areas in the mask become explored; black areas remain unexplored.
+   * @param {Scene|string} sceneOrId
+   * @param {string} maskPath
+   * @param {boolean} persistFlag=true  If true, store the mask path on the Scene as `flags.merlin.fogMask`.
+   * @returns {Promise<void>}
+   */
+  async seedInitialFogMaskForScene(sceneOrId, maskPath, persistFlag = true, overwrite = true) {
+    const scene = typeof sceneOrId === "string" ? game.scenes.get(sceneOrId) : sceneOrId;
+    if (!scene) throw new Error("Scene not found.");
+    if (!maskPath) throw new Error("A mask PNG path is required.");
+    if (!game.user.isGM) {
+      throw new Error("Only a GM can seed fog masks for all users.");
+    }
+
+    if (persistFlag) {
+      await scene.update({"flags.merlin.fogMask": maskPath});
+    }
+
+    const dims = scene.getDimensions();
+    const maskTexture = await this._loadTexture(maskPath);
+    const explored = await this._maskTextureToExploredBase64(maskTexture, dims);
+    maskTexture?.destroy?.(true);
+
+    if (!explored) return;
+    const levelId = scene._view ?? scene.initialLevel?.id ?? scene.firstLevel?.id ?? scene.constructor.metadata.defaultLevelId;
+    const fogExplorationCls = foundry.documents.FogExploration;
+    const targets = [...game.users].filter(user => !!user?.id);
+
+    let updated = false;
+    for (const user of targets) {
+      const exploration = await fogExplorationCls.load({scene: scene.id, user});
+      if (exploration && !overwrite) continue;
+
+      updated = true;
+      await fogExplorationCls.create({
+        scene: scene.id,
+        level: levelId,
+        user: user.id,
+        explored,
+        timestamp: Date.now()
+      }, {loadFog: false});
+    }
+
+    if(updated) {
+      game.socket.emit("module.merlins-miscellany", { action: "windowReload" });
+      window.location.reload();
+    }
+  }
+
+  async _loadTexture(src) {
+    const asset = await PIXI.Assets.load(src);
+    const texture = asset instanceof PIXI.Texture
+      ? asset
+      : asset?.baseTexture
+        ? new PIXI.Texture(asset.baseTexture)
+        : asset instanceof PIXI.BaseTexture
+          ? new PIXI.Texture(asset)
+          : null;
+
+    if (!texture) throw new Error(`Unable to load texture from "${src}".`);
+    if (texture.baseTexture && !texture.baseTexture.valid) {
+      await new Promise(resolve => texture.once("update", resolve));
+    }
+    return texture;
+  }
+
+  async _maskTextureToExploredBase64(maskTexture, dims) {
+    const sprite = new PIXI.Sprite(maskTexture);
+    sprite.position.set(0, 0);
+    sprite.width = dims.width;
+    sprite.height = dims.height;
+
+    const extracted = canvas.app.renderer.extract.canvas(sprite);
+    sprite.destroy({children: true, texture: false, baseTexture: false});
+
+    const context = extracted.getContext("2d");
+    const imageData = context.getImageData(0, 0, extracted.width, extracted.height);
+    const pixels = imageData.data;
+
+    for (let i = 0; i < pixels.length; i += 4) {
+      const alpha = Math.round((pixels[i] * pixels[i + 3]) / 255);
+      pixels[i] = 255;
+      pixels[i + 1] = 255;
+      pixels[i + 2] = 255;
+      pixels[i + 3] = alpha;
+    }
+
+    context.putImageData(imageData, 0, 0);
+    return extracted.toDataURL("image/png");
   }
 
   // Watch for light updates
@@ -316,6 +420,41 @@ class Merlin{
       button: true
     };
     controls.tokens.tools[poiButton.name] = poiButton;
+
+    const fogResetTool = controls.lighting?.tools?.reset;
+    if (fogResetTool && !fogResetTool._merlinFogMaskWrapped) {
+      fogResetTool.onChange = () => {
+        const fogMaskPath = canvas.scene?.flags?.merlin?.fogMask;
+        if (!game.user.isGM || !fogMaskPath) return;
+
+        const sceneName = canvas.scene?.name ?? "this scene";
+        new Dialog({
+          title: "Reset Fog of War?",
+          content: `<p>This will clear fog exploration progress for <strong>${sceneName}</strong> and force all connected players to reload.</p><p>Do you want to continue?</p>`,
+          buttons: {
+            confirm: {
+              label: "Reset",
+              callback: () => {
+                setTimeout(async () => {
+                  try {
+                    await this.seedInitialFogMaskForScene(canvas.scene, fogMaskPath, false, true);
+                    ui.notifications.info("Fog of War exploration progress was reset for this Scene");
+                  } catch (err) {
+                    console.error("Merlin | Failed to restore scene fog mask after fog reset:", err);
+                    ui.notifications.error(`Merlin: Failed to restore fog mask for scene "${canvas.scene.name}".`);
+                  }
+                }, 250);
+              }
+            },
+            cancel: {
+              label: "Cancel"
+            }
+          },
+          default: "cancel"
+        }).render(true);
+      };
+      fogResetTool._merlinFogMaskWrapped = true;
+    }
 
     // Split into directory + filename
     if(!canvas.scene) return;
@@ -577,7 +716,11 @@ class Merlin{
   }
 
   _onSocket(data) {
-    if (!game.user.isGM) return;
+    if (data.action === "windowReload") {
+      window.location.reload();
+    }
+    
+    if(!game.user.isGM) return;
 
     if (data.action === "teleportToken") {
       this.#teleportTokenToTile(data.sourceSceneId, data.targetSceneId, data.targetTileId, data.tokenId);
@@ -698,6 +841,7 @@ class Merlin{
     this.teleportingTokenIds.delete(tokenId);
     this.teleportedTokenIds.add(created[0]._id);
   }
+
 }
 
 // Register our hook + sheet override

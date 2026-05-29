@@ -791,6 +791,16 @@ class Merlin{
     this.#teleportTokenToPosition(sourceSceneId,targetSceneId, snapped, tokenId);
   }
 
+  getSnappedPosition(targetTile, targetScene){
+    // Not sure when this was deprecated but 14 seems like a good guess.
+    if(game.version >= 14){
+      return targetScene.grid.getSnappedPoint({x: targetTile.x - 1, y: targetTile.y - 1}, {mode: CONST.GRID_SNAPPING_MODES.TOP_LEFT_CORNER, resolution: 1});      
+    }
+    else{
+      return targetScene.grid.getSnappedPosition(targetTile.x, targetTile.y, 1);
+    }
+  }
+
   async #teleportTokenToPosition(sourceSceneId, targetSceneId, targetPosition, tokenId) {
     // Checks to stop teleporting on arrival loops
     if(this.teleportingTokenIds.has(tokenId)){
@@ -810,22 +820,33 @@ class Merlin{
     duplToken.x = targetPosition.x - duplToken.width / 2;
     duplToken.y = targetPosition.y - duplToken.height / 2;
     
-    const created = await targetScene.createEmbeddedDocuments("Token", [duplToken]);  
+    const created = await targetScene.createEmbeddedDocuments("Token", [duplToken]);
+    const createdId = created[0]._id;
 
-    // For any users controlling the original token, pull them to the new scene
+    // For any users controlling the original token, pull them to the new scene (if any) + grab the new token
     const actor = game.actors.get(duplToken.actorId);
     const owners = actor ? game.users.filter(u => actor.testUserPermission(u, "OWNER")) : [];
     await owners.forEach(user => {
       if(!(user.isGM && !this.GMControlledTokenIds.has(tokenId))){
-        // Players will keep control of their token automatically.
-        // GMs need to manually take control of the new token after the canvas is loaded.
-        if(user.isGM){
-          Hooks.once("canvasReady", (canvas) => {
-            const newToken = canvas.tokens.get(created[0]._id);
-            newToken.control();
-          });
+        if(user.viewedScene !== targetScene.id){
+          if(game.version >= 14){
+            targetScene.pullUsers([user.id]);
+          }
+          else{
+            game.socket.emit("pullToScene", targetScene.id, user.id);
+          }
+          
+          // Players will keep control of their token automatically.
+          // GMs need to manually take control of the new token after the canvas is loaded.
+          if(user.isGM){
+            Hooks.once("canvasReady", (canvas) => {
+              this.controlToken(createdId);
+            });
+          }
         }
-        game.socket.emit("pullToScene", targetScene.id, user.id);
+        else {
+          this.controlToken(createdId);
+        }
       }
     })
 
@@ -839,7 +860,19 @@ class Merlin{
     }, 100);
 
     this.teleportingTokenIds.delete(tokenId);
-    this.teleportedTokenIds.add(created[0]._id);
+    this.teleportedTokenIds.add(createdId);
+  }
+
+  async controlToken(tokenId){
+      const token = canvas.tokens.get(tokenId);
+      if(token){
+        token.control();
+      }
+      else{
+        setTimeout(() => {
+          this.controlToken(tokenId);
+        }, 100);
+      }
   }
 
 }

@@ -78,6 +78,8 @@ class Merlin{
   }
 
   usersUseMerlinVideo = {};
+  // Map of tile teleportIdentifiers to tile IDs for tiles with teleport OUT enabled. An identifier can be linked to multiple tiles.
+  teleportTileIds = {};
   
   // The scene control (left-side control buttons) that was previously active
   prevActiveControl = "";
@@ -87,52 +89,211 @@ class Merlin{
     // Extend ambient light sheet class with our custom class
     CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls = WithActiveLightConfig(CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls);
 
-    const { WithActiveTileConfig } = await import("/modules/monks-active-tiles/apps/active-tile-config.js");
     const oldSheetClass = CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls;
-    const ActiveTileConfig = WithActiveTileConfig(oldSheetClass);
 
     // Declare our custom TileConfig class
-    const MerlinActiveTileConfig = (TileConfig) => {
-      class MerlinTileConfig extends ActiveTileConfig {
+    class MerlinTileConfig extends oldSheetClass {
+        static #MERLIN_TRIGGERS = ["enter", "exit", "stop within"];
+
         /** @override */
         // Use our custom HTML instead
         static PARTS = {
           ...super.PARTS,
-          appearance: { template: "modules/merlins-miscellany/templates/appearance.hbs" }
-        };       
+          appearance: { template: "modules/merlins-miscellany/templates/appearance.hbs" },
+          merlin: { template: "modules/merlins-miscellany/templates/merlin.hbs" }
+        };
+
+        /** @override */
+        static TABS = {
+          sheet: {
+            tabs: [
+              { id: "position", icon: "fa-solid fa-location-dot", label: "TILE.TABS.position" },
+              { id: "appearance", icon: "fa-solid fa-image", label: "TILE.TABS.appearance" },
+              { id: "overhead", icon: "fa-solid fa-house", label: "TILE.TABS.overhead" },
+              { id: "merlin", icon: "fa-solid fa-hat-wizard", label: "Merlin" }
+            ],
+            initial: "position"
+          }
+        };
 
         async _processSubmitData(event, form, submitData, options = {}) {
-          const isPOI = foundry.utils.getProperty(submitData.flags, "merlin.isPOI") ?? false;
-          super._processSubmitData(event, form, submitData, options);          
-          foundry.utils.setProperty(this.document.flags, "merlin.isPOI", isPOI);
+          const merlinFlags = foundry.utils.getProperty(submitData, "flags.merlin") ?? {};
+
+          // Update identifier map if teleportIdentifier changed
+          if(merlinFlags.teleportIdentifier !== merlinFlags.teleportIdentifierPrev){
+            // Remove the old identifier from the map
+            if(merlinFlags.teleportIdentifierPrev){
+              const tileIds = game.merlin.teleportTileIds[merlinFlags.teleportIdentifierPrev];
+              if(tileIds){
+                const index = tileIds.indexOf(this.document.id);
+                if(index > -1){
+                  tileIds.splice(index, 1);
+                }
+              }
+            }
+            // Add the new identifier to the map
+            if(merlinFlags.teleportIdentifier && merlinFlags.teleportOut){
+              if(!game.merlin.teleportTileIds[merlinFlags.teleportIdentifier]){
+                game.merlin.teleportTileIds[merlinFlags.teleportIdentifier] = [];
+              }
+              game.merlin.teleportTileIds[merlinFlags.teleportIdentifier].push([this.document.parent._id, this.document._id]);
+            }
+          }
+          merlinFlags.teleportIdentifierPrev = merlinFlags.teleportIdentifier;
+
+          submitData.flags ??= {};
+          submitData.flags.merlin = {
+            active: !!merlinFlags.active,
+            triggers: this._normalizeMerlinTriggers(merlinFlags.triggers),
+            runCode: merlinFlags.runCode ?? "",
+            teleportIn: !!merlinFlags.teleportIn,
+            teleportOut: !!merlinFlags.teleportOut,
+            relativeLocation: !!merlinFlags.relativeLocation,
+            teleportIdentifier: merlinFlags.teleportIdentifier ?? "",
+            teleportIdentifierPrev: merlinFlags.teleportIdentifierPrev ?? "",
+            isPOI: !!merlinFlags.isPOI
+          };
+          
+          await super._processSubmitData(event, form, submitData, options);
         }
 
         /** @override */
         getData(options) {
           const data = super.getData(options);
+          const triggers = this._normalizeMerlinTriggers(this.document.getFlag("merlin", "triggers"));
           data.source.flags = foundry.utils.mergeObject(data.source.flags ?? {}, {
             "merlin": {
-              isPOI: this.document.getFlag("merlin", "isPOI") ?? "",
+              active: this.document.getFlag("merlin", "active") ?? true,
+              triggers,
+              runCode: this.document.getFlag("merlin", "runCode") ?? "",
+              teleportIn: this.document.getFlag("merlin", "teleportIn") ?? false,
+              teleportOut: this.document.getFlag("merlin", "teleportOut") ?? false,
+              relativeLocation: this.document.getFlag("merlin", "relativeLocation") ?? false,
+              teleportIdentifier: this.document.getFlag("merlin", "teleportIdentifier") ?? "",
+              teleportIdentifierPrev: this.document.getFlag("merlin", "teleportIdentifierPrev") ?? "",
+              isPOI: this.document.getFlag("merlin", "isPOI") ?? false,
             }
           });
           return data;
         }
-        
-        // Remove the extra 'save template' button that gets added when we extend ActiveTileConfig
-        // for some fucking reason
-        async _prepareContext(options) {
-          const context = await super._prepareContext(options);
-          context.buttons.splice(0, 1);
-          return context;
+
+        /** @override */
+        async _preparePartContext(partId, context, options) {
+          const partContext = await super._preparePartContext(partId, context, options);
+          if (partId === "merlin") {
+            partContext.triggerOptions = MerlinTileConfig.#MERLIN_TRIGGERS.map(trigger => ({
+              value: trigger,
+              label: trigger.charAt(0).toUpperCase() + trigger.slice(1)
+            }));
+            partContext.triggerJson = JSON.stringify(partContext.source.flags?.merlin?.triggers ?? []);
+          }
+          return partContext;
+        }
+
+        _normalizeMerlinTriggers(value) {
+          const allowed = new Set(MerlinTileConfig.#MERLIN_TRIGGERS);
+          let triggers = [];
+
+          if (Array.isArray(value)) {
+            triggers = value;
+          } else if (typeof value === "string") {
+            const trimmed = value.trim();
+            if (trimmed) {
+              try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) triggers = parsed;
+                else triggers = trimmed.split(",");
+              } catch {
+                triggers = trimmed.split(",");
+              }
+            }
+          }
+
+          return [...new Set(triggers.map(trigger => String(trigger).trim().toLowerCase()).filter(trigger => allowed.has(trigger)))];
+        }
+
+        /** @override */
+        _attachPartListeners(partId, htmlElement, options) {
+          super._attachPartListeners(partId, htmlElement, options);
+          if (partId !== "merlin") return;
+
+          const select = htmlElement.querySelector("[data-merlin-trigger-select]");
+          const list = htmlElement.querySelector("[data-merlin-trigger-list]");
+          const hidden = htmlElement.querySelector('input[name="flags.merlin.triggers"]');
+          if (!select || !list || !hidden) return;
+
+          const renderTriggerList = () => {
+            const triggers = this._normalizeMerlinTriggers(hidden.value);
+            list.replaceChildren(...triggers.map(trigger => {
+              const chip = document.createElement("span");
+              chip.className = "merlin-trigger-chip";
+              chip.dataset.trigger = trigger;
+
+              const label = document.createElement("span");
+              label.textContent = trigger;
+
+              const remove = document.createElement("button");
+              remove.type = "button";
+              remove.className = "merlin-trigger-remove";
+              remove.dataset.merlinRemoveTrigger = trigger;
+              remove.setAttribute("aria-label", `Remove ${trigger}`);
+              remove.innerHTML = "&times;";
+
+              chip.append(label, remove);
+              return chip;
+            }));
+          };
+
+          const commitTriggers = (triggers) => {
+            hidden.value = JSON.stringify(this._normalizeMerlinTriggers(triggers));
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+            renderTriggerList();
+          };
+
+          select.addEventListener("change", () => {
+            const value = select.value;
+            if (!value) return;
+            const triggers = this._normalizeMerlinTriggers(hidden.value);
+            if (!triggers.includes(value)) {
+              triggers.push(value);
+              commitTriggers(triggers);
+            }
+            select.value = "";
+          });
+
+          list.addEventListener("click", event => {
+            const button = event.target.closest("[data-merlin-remove-trigger]");
+            if (!button) return;
+            const trigger = button.dataset.merlinRemoveTrigger;
+            const triggers = this._normalizeMerlinTriggers(hidden.value).filter(value => value !== trigger);
+            commitTriggers(triggers);
+          });
+
+          renderTriggerList();
+        }
+
+    }
+
+    Object.defineProperty(MerlinTileConfig.prototype.constructor, "name", { value: "MerlinTileConfig" });
+    // Loop through all tiles in all scenes and build our teleportTileIds map for tiles with teleport OUT enabled
+    this.teleportTileIds = {};
+    for(let scene of game.scenes){
+      for(let tileData of scene.tiles){
+        const teleportOut = tileData.flags?.merlin?.teleportOut;
+        if(teleportOut){
+          const identifier = tileData.flags?.merlin?.teleportIdentifier;
+          if(identifier){
+            if(!this.teleportTileIds[identifier]){
+              this.teleportTileIds[identifier] = [];
+            }
+            this.teleportTileIds[identifier].push([scene.id, tileData.id]);
+          }
         }
       }
+    }
 
-      Object.defineProperty(MerlinTileConfig.prototype.constructor, "name", { value: "MerlinTileConfig" });
-      return MerlinTileConfig;
-    };
-    
-    // Extend monk's tile sheet class with custom class
-    CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls = MerlinActiveTileConfig(oldSheetClass);
+    // Extend Foundry's base tile sheet class with our custom class
+    CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls = MerlinTileConfig;
 
     game.socket.on(`module.merlins-miscellany`, this._onSocket.bind(this));
 
@@ -389,7 +550,73 @@ class Merlin{
       }
       // Store previous movement
       this.prevMovementMap.set(tokenData._id, updateData._movement[tokenData._id]);
+
+      // For each tile in the scene with a Merlin trigger, check if it should be triggered by this movement and if so, run its code
+      const token = canvas.tokens.get(tokenData._id);
+      if(!token) return;
+      for(let tile of canvas.tiles.placeables){
+        try{
+          const merlinFlags = tile.document.flags?.merlin;
+          if(!merlinFlags?.active) continue;
+          const triggers = merlinFlags.triggers ?? [];
+          const shouldTrigger = (triggers.includes("enter") && this._checkMovementTrigger(token, tile.document, "enter"))
+            || (triggers.includes("exit") && this._checkMovementTrigger(token, tile.document, "exit"))
+            || (triggers.includes("stop within") && this._checkMovementTrigger(token, tile.document, "stop within"));
+          if(shouldTrigger){
+            // Run the tile's code
+            const code = merlinFlags.runCode;
+            if (code) {
+              try {
+                console.log(`Merlin | Running code for tile ${tile.id} triggered by token ${token.id}`);
+                // eslint-disable-next-line no-eval
+                eval(code);
+              } catch (err) {
+                console.error("Merlin | Error in runCode:", err);
+                ui.notifications.error(`Merlin: Error in runCode for tile ${tile.id}`);
+              }
+            }
+            // Trigger the tile's teleport if enabled
+            if(merlinFlags.teleportIn){
+              const identifier = merlinFlags.teleportIdentifier;
+              const destinations = this.teleportTileIds[identifier];
+              if(destinations){
+                let destination = destinations[Math.floor(Math.random() * destinations.length)];
+                if(!merlinFlags.relativeLocation){
+                  this.teleportTokenToTile(tile.document.parent._id, destination[0], destination[1], token.document._id);
+                } else {
+                  this.teleportTokenToTileRelative(tile.document.parent._id, tile.document._id,destination[0], destination[1], token.document._id);
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Merlin | Error processing tile:", err);
+        }
+      }
     }
+  }
+  _checkMovementTrigger(token, tile, triggerType){    
+    const prevMovement = this.prevMovementMap.get(token.document._id);
+    if(!prevMovement) return false;
+    const tokenWidth = token.document.width * canvas.grid.size;
+    const tokenHeight = token.document.height * canvas.grid.size;
+    const tileRect = new PIXI.Rectangle(tile.x - tile.width / 2, tile.y - tile.height / 2, tile.width, tile.height);
+    const destinationRect = new PIXI.Rectangle(prevMovement.destination.x, prevMovement.destination.y, tokenWidth, tokenHeight);
+    const originRect = new PIXI.Rectangle(prevMovement.origin.x, prevMovement.origin.y, tokenWidth, tokenHeight);
+    if(triggerType === "enter"){
+      return !this._rectsIntersect(originRect, tileRect) && this._rectsIntersect(destinationRect, tileRect);
+    }
+    else if(triggerType === "exit"){
+      return this._rectsIntersect(originRect, tileRect) && !this._rectsIntersect(destinationRect, tileRect);
+    }
+    else if(triggerType === "stop within"){
+      return this._rectsIntersect(destinationRect, tileRect);
+    }
+    return false;
+  }
+
+  _rectsIntersect(rect1, rect2, margin = 0){
+    return rect1.x < rect2.x + rect2.width + margin && rect1.x + rect1.width > rect2.x - margin && rect1.y < rect2.y + rect2.height + margin && rect1.y + rect1.height > rect2.y - margin;
   }
 
   userPOIVisibility = {};

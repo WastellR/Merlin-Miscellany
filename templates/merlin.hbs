@@ -1,0 +1,81 @@
+<section class="tab standard-form scrollable {{tabs.merlin.cssClass}}"
+    data-tab="merlin" data-group="{{tabs.merlin.group}}">
+    <div class="form-group">
+        <label for="{{concat rootId "-" "merlin-active"}}">Active</label>
+        <input id="{{concat rootId "-" "merlin-active"}}"
+               type="checkbox"
+               name="flags.merlin.active"
+               {{checked source.flags.merlin.active}} />
+    </div>
+
+    <div class="form-group">
+        <label>Triggers</label>
+        <div class="merlin-trigger-picker" style="display:flex;flex-direction:column;gap:0.5rem;">
+            <select class="form-control" data-merlin-trigger-select>
+                <option value="">Add a trigger...</option>
+                {{#each triggerOptions as |trigger|}}
+                <option value="{{trigger.value}}">{{trigger.label}}</option>
+                {{/each}}
+            </select>
+            <div class="merlin-trigger-list" data-merlin-trigger-list style="display:flex;flex-wrap:wrap;gap:0.35rem;">
+                {{#each source.flags.merlin.triggers as |trigger|}}
+                <span class="merlin-trigger-chip" data-trigger="{{trigger}}" style="display:inline-flex;align-items:center;gap:0.25rem;padding:0.15rem 0.4rem;border:1px solid var(--color-border-light-primary);border-radius:0.25rem;">
+                    <span>{{trigger}}</span>
+                    <button type="button"
+                            class="merlin-trigger-remove"
+                            data-merlin-remove-trigger="{{trigger}}"
+                            aria-label="Remove {{trigger}}"
+                            style="border:none;background:transparent;cursor:pointer;padding:0;line-height:1;">&times;</button>
+                </span>
+                {{/each}}
+            </div>
+            <input type="hidden"
+                   name="flags.merlin.triggers"
+                   data-dtype="JSON"
+                   value="{{triggerJson}}" />
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label for="{{concat rootId "-" "merlin-runCode"}}">Run code</label>
+        <textarea id="{{concat rootId "-" "merlin-runCode"}}"
+                  name="flags.merlin.runCode"
+                  class="form-control lw-runcode-textarea"
+                  rows="6"
+                  placeholder="Enter JavaScript to run when this tile is triggered.">{{{source.flags.merlin.runCode}}}</textarea>
+    </div>
+
+    <fieldset>
+        <legend>Teleport</legend>
+        <div class="form-group">
+            <label for="{{concat rootId "-" "merlin-teleportIn"}}">In</label>
+            <input id="{{concat rootId "-" "merlin-teleportIn"}}"
+                   type="checkbox"
+                   name="flags.merlin.teleportIn"
+                   {{checked source.flags.merlin.teleportIn}} />
+        </div>
+        <div class="form-group">
+            <label for="{{concat rootId "-" "merlin-teleportOut"}}">Out</label>
+            <input id="{{concat rootId "-" "merlin-teleportOut"}}"
+                   type="checkbox"
+                   name="flags.merlin.teleportOut"
+                   {{checked source.flags.merlin.teleportOut}} />
+        </div>
+        <div class="form-group">
+            <label for="{{concat rootId "-" "merlin-relativeLocation"}}">Relative location</label>
+            <input id="{{concat rootId "-" "merlin-relativeLocation"}}"
+                   type="checkbox"
+                   name="flags.merlin.relativeLocation"
+                   {{checked source.flags.merlin.relativeLocation}} />
+        </div>
+        <div class="form-group">
+            <label for="{{concat rootId "-" "merlin-teleportIdentifier"}}">Identifier</label>
+            <input id="{{concat rootId "-" "merlin-teleportIdentifier"}}"
+                   type="text"
+                   class="form-control"
+                   name="flags.merlin.teleportIdentifier"
+                   value="{{source.flags.merlin.teleportIdentifier}}"
+                   placeholder="Enter a teleport identifier." />
+        </div>
+    </fieldset>
+</section>

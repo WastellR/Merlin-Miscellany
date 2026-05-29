@@ -772,7 +772,7 @@ class Merlin{
   async #teleportTokenToTile(sourceSceneId, targetSceneId, targetTileId, tokenId) {
     const targetScene = game.scenes.get(targetSceneId);
     const targetTile = targetScene.tiles.get(targetTileId);
-    const snapped = targetScene.grid.getSnappedPosition(targetTile.x, targetTile.y, 1);
+    let snapped = this.getSnappedPosition(targetTile, targetScene);
     
     this.#teleportTokenToPosition(sourceSceneId,targetSceneId, snapped, tokenId);
   }
@@ -783,10 +783,11 @@ class Merlin{
     const targetScene = game.scenes.get(targetSceneId);
     const targetTile = targetScene.tiles.get(targetTileId);
     const token = sourceScene.tokens.get(tokenId);
+    const prevMovement = this.prevMovementMap.get(tokenId);
 
-    const relativeX = token.x - sourceTile.x;
-    const relativeY = token.y - sourceTile.y;
-    const snapped = targetScene.grid.getSnappedPosition(targetTile.x + relativeX, targetTile.y + relativeY, 1);
+    let relativeX = (prevMovement.destination.x - sourceTile.x) * (targetTile.width / sourceTile.width);
+    let relativeY = (prevMovement.destination.y - sourceTile.y) * (targetTile.height / sourceTile.height);
+    const snapped = this.getSnappedPosition({x: targetTile.x + relativeX, y: targetTile.y + relativeY}, targetScene);
     
     this.#teleportTokenToPosition(sourceSceneId,targetSceneId, snapped, tokenId);
   }

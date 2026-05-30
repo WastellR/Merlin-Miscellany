@@ -961,6 +961,108 @@ class Merlin{
     }
   }
 
+  _getActiveSceneVariantInfo(){
+    if(!canvas.scene) return null;
+
+    let backgroundPath = canvas.scene.background?.src ?? "";
+    let activeLevel = null;
+    if(game.version >= 14){
+      activeLevel = canvas.scene.levels.get(canvas.scene._view);
+      backgroundPath = activeLevel?.background?.src ?? backgroundPath;
+    }
+
+    const filename = backgroundPath.split("/").pop();
+    const backgroundInfo = filename ? this._getBackgroundTypeFromFilename(filename) : {
+      isVideo: false,
+      weather: "none",
+      time: "day"
+    };
+
+    return {
+      backgroundPath,
+      activeLevel,
+      weather: this.sceneMerlinWeather[canvas.scene.id] ?? backgroundInfo.weather,
+      time: this.sceneMerlinTime[canvas.scene.id] ?? backgroundInfo.time,
+      isVideo: this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo
+    };
+  }
+
+  async _resolveVariantPath(filePath, variantInfo = null){
+    if(!filePath) return filePath;
+
+    const parts = filePath.split("/");
+    const filename = parts.pop();
+    const dir = parts.join("/");
+    if(!dir || !filename){
+      return filePath;
+    }
+
+    const baseInfo = this._getBackgroundTypeFromFilename(filename);
+    const targetInfo = {
+      isVideo: variantInfo?.isVideo ?? baseInfo.isVideo,
+      weather: variantInfo?.weather ?? baseInfo.weather,
+      time: variantInfo?.time ?? baseInfo.time
+    };
+
+    try {
+      const result = await foundry.applications.apps.FilePicker.browse("data", dir);
+      let bestCandidate = filePath;
+      let bestScore = [-1, -1, -1, -1];
+
+      for(const path of result.files){
+        const f = path.split("/").pop();
+        if(f === filename) continue;
+
+        const fInfo = this._getBackgroundTypeFromFilename(f);
+        if(fInfo.stem !== baseInfo.stem) continue;
+        if(fInfo.isFG) continue;
+
+        const score = [
+          fInfo.time === targetInfo.time ? 1 : 0,
+          fInfo.weather === targetInfo.weather ? 1 : 0,
+          fInfo.isVideo === targetInfo.isVideo ? 1 : 0,
+          fInfo.miscSuffix ? 0 : 1
+        ];
+
+        let isBetter = false;
+        for(let i = 0; i < score.length; i++){
+          if(score[i] > bestScore[i]){
+            isBetter = true;
+            break;
+          }
+          if(score[i] < bestScore[i]){
+            break;
+          }
+        }
+
+        if(isBetter){
+          bestScore = score;
+          bestCandidate = `${dir}/${f}`;
+        }
+      }
+
+      return bestCandidate;
+    } catch (err) {
+      console.warn("Merlin | Failed to resolve popup image variant:", err);
+      return filePath;
+    }
+  }
+
+  async showPopupImage(filePath, options = {}){
+    const variantInfo = this._getActiveSceneVariantInfo();
+    const resolvedPath = await this._resolveVariantPath(filePath, variantInfo);
+    const title = options.title ?? resolvedPath.split("/").pop();
+    const safeTitle = foundry.utils.escapeHTML(title);
+    const safePath = foundry.utils.escapeHTML(resolvedPath);
+
+    new foundry.applications.apps.ImagePopout({
+      src: safePath,
+      window: {
+          title: safeTitle
+      }
+    }).render(true);
+  }
+
   _getKeyFromBackgroundInfo(backgroundInfo){
     return `${backgroundInfo.isVideo}_${backgroundInfo.weather}_${backgroundInfo.time}`;
   }

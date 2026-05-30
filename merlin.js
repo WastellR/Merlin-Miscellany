@@ -93,7 +93,7 @@ class Merlin{
 
     // Declare our custom TileConfig class
     class MerlinTileConfig extends oldSheetClass {
-        static #MERLIN_TRIGGERS = ["enter", "exit", "stop within"];
+        static #MERLIN_TRIGGERS = ["enter", "exit", "stop within", "click", "double click"];
 
         /** @override */
         // Use our custom HTML instead
@@ -183,7 +183,7 @@ class Merlin{
           if (partId === "merlin") {
             partContext.triggerOptions = MerlinTileConfig.#MERLIN_TRIGGERS.map(trigger => ({
               value: trigger,
-              label: trigger.charAt(0).toUpperCase() + trigger.slice(1)
+              label: trigger.replace(/\b\w/g, char => char.toUpperCase())
             }));
             partContext.triggerJson = JSON.stringify(partContext.source.flags?.merlin?.triggers ?? []);
           }
@@ -294,6 +294,8 @@ class Merlin{
 
     // Extend Foundry's base tile sheet class with our custom class
     CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls = MerlinTileConfig;
+
+    this._bindMerlinDocumentClickListener();
 
     game.socket.on(`module.merlins-miscellany`, this._onSocket.bind(this));
 
@@ -523,6 +525,92 @@ class Merlin{
     }
   }
 
+  _bindMerlinDocumentClickListener() {
+    if (this._merlinDocumentClickListenerBound) return;
+    this._merlinDocumentClickHandler = this._handleMerlinDocumentClick.bind(this);
+    document.addEventListener("click", this._merlinDocumentClickHandler, true);
+    this._merlinDocumentClickListenerBound = true;
+    this._merlinTileClickTimers = new Map();
+  }
+
+  _cancelMerlinTileTrigger(tileId) {
+    const timer = this._merlinTileClickTimers?.get(tileId);
+    if (timer) {
+      clearTimeout(timer);
+      this._merlinTileClickTimers.delete(tileId);
+    }
+  }
+
+  _handleMerlinDocumentClick(event) {
+    if (!canvas?.ready || !canvas.scene || !canvas.app?.view?.contains(event.target)) return;
+    if (event.button !== 0) return;
+    if (ui.controls.control.name === "tiles") return;
+
+    const {x, y} = canvas.canvasCoordinatesFromClient({x: event.clientX, y: event.clientY});
+    const clickPoint = new PIXI.Point(x, y);
+    const detail = Number(event.detail ?? 1);
+    const tiles = canvas.tiles?.placeables ?? [];
+
+    for (const tile of tiles) {
+      const merlinFlags = tile?.document?.flags?.merlin;
+      if (!merlinFlags?.active) continue;
+      if (!this._tileContainsPoint(tile, clickPoint)) continue;
+      if (tile?.document?.flags?.["merlin"]?.isPOI && !this.userPOIVisibility[game.userId]) continue;
+
+      const triggers = merlinFlags.triggers ?? [];
+      if (detail >= 2) {
+        this._cancelMerlinTileTrigger(tile.id);
+        if (triggers.includes("double click")) this._runMerlinTileTrigger(tile, null, "double click");
+        continue;
+      }
+
+      if (!triggers.includes("click")) continue;
+      this._cancelMerlinTileTrigger(tile.id);
+      const timer = setTimeout(() => {
+        this._merlinTileClickTimers.delete(tile.id);
+        this._runMerlinTileTrigger(tile, null, "click");
+      }, 260);
+      this._merlinTileClickTimers.set(tile.id, timer);
+    }
+  }
+
+  _tileContainsPoint(tile, point) {
+    const shape = tile?.document?.shape;
+    if (shape?.testPoint) return shape.testPoint(point);
+    const rect = new PIXI.Rectangle(tile.x - tile.width / 2, tile.y - tile.height / 2, tile.width, tile.height);
+    return this._rectsIntersect(rect, new PIXI.Rectangle(point.x, point.y, 1, 1));
+  }
+
+  _runMerlinTileTrigger(tile, token = null, triggerType = "movement") {
+    const merlinFlags = tile?.document?.flags?.merlin;
+    if (!merlinFlags?.active) return;
+
+    const code = merlinFlags.runCode;
+    if (code) {
+      try {
+        console.log(`Merlin | Running code for tile ${tile.id} triggered by ${triggerType}${token ? ` token ${token.id}` : ""}`);
+        // eslint-disable-next-line no-eval
+        eval(code);
+      } catch (err) {
+        console.error("Merlin | Error in runCode:", err);
+        ui.notifications.error(`Merlin: Error in runCode for tile ${tile.id}`);
+      }
+    }
+
+    if (!token || !merlinFlags.teleportIn) return;
+
+    const identifier = merlinFlags.teleportIdentifier;
+    const destinations = this.teleportTileIds[identifier];
+    if (!destinations) return;
+
+    const destination = destinations[Math.floor(Math.random() * destinations.length)];
+    if (!merlinFlags.relativeLocation) {
+      this.teleportTokenToTile(tile.document.parent._id, destination[0], destination[1], token.document._id);
+    } else if (triggerType === "movement") {
+      this.teleportTokenToTileRelative(tile.document.parent._id, tile.document._id, destination[0], destination[1], token.document._id);
+    }
+  }
+
   // Supposed to keep track of tokens controlled by the primary GM
   // But not sure how it will interact with additional GMs who can also control tokens
   GMControlledTokenIds = new Set();
@@ -563,31 +651,7 @@ class Merlin{
             || (triggers.includes("exit") && this._checkMovementTrigger(token, tile.document, "exit"))
             || (triggers.includes("stop within") && this._checkMovementTrigger(token, tile.document, "stop within"));
           if(shouldTrigger){
-            // Run the tile's code
-            const code = merlinFlags.runCode;
-            if (code) {
-              try {
-                console.log(`Merlin | Running code for tile ${tile.id} triggered by token ${token.id}`);
-                // eslint-disable-next-line no-eval
-                eval(code);
-              } catch (err) {
-                console.error("Merlin | Error in runCode:", err);
-                ui.notifications.error(`Merlin: Error in runCode for tile ${tile.id}`);
-              }
-            }
-            // Trigger the tile's teleport if enabled
-            if(merlinFlags.teleportIn){
-              const identifier = merlinFlags.teleportIdentifier;
-              const destinations = this.teleportTileIds[identifier];
-              if(destinations){
-                let destination = destinations[Math.floor(Math.random() * destinations.length)];
-                if(!merlinFlags.relativeLocation){
-                  this.teleportTokenToTile(tile.document.parent._id, destination[0], destination[1], token.document._id);
-                } else {
-                  this.teleportTokenToTileRelative(tile.document.parent._id, tile.document._id,destination[0], destination[1], token.document._id);
-                }
-              }
-            }
+            this._runMerlinTileTrigger(tile, token, "movement");
           }
         } catch (err) {
           console.error("Merlin | Error processing tile:", err);

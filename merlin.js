@@ -932,7 +932,9 @@ class Merlin{
         name: "selectMerlinTime",
         title: this.currentBackgroundInfo.time === "day" ? "Switch To Night" : "Switch To Day",
         icon: this.currentBackgroundInfo.time === "day" ? "fas fa-moon" : "fas fa-sun",
-        onClick: (toggle) => {
+        toggle: game.version < 14,
+        active: this.currentBackgroundInfo.time === "night" ?? false,
+        onChange: (toggle) => {
           let desiredBackgroundInfo = this.currentBackgroundInfo;
           desiredBackgroundInfo.time = this.currentBackgroundInfo.time === "day" ? "night" : "day";
           console.log("Merlin | " + "Switching time to " + desiredBackgroundInfo.time);
@@ -955,7 +957,7 @@ class Merlin{
         icon: "fas fa-cloud-rain",
         toggle: true, 
         active: this.currentBackgroundInfo.weather === "rain" ?? false,
-        onClick: (toggle) => {
+        onChange: (toggle) => {
           let desiredBackgroundInfo = this.currentBackgroundInfo;
           desiredBackgroundInfo.weather = this.currentBackgroundInfo.weather === "rain" ? "none" : "rain";
           console.log("Merlin | " + "Switching weather to " + desiredBackgroundInfo.weather);

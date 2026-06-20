@@ -486,7 +486,7 @@ class Merlin{
 
     let updated = false;
     for (const user of targets) {
-      const exploration = await fogExplorationCls.load({scene: scene.id, user});
+      const exploration = await fogExplorationCls.load({scene: scene, user: user});
       if (exploration && !overwrite) continue;
 
       updated = true;

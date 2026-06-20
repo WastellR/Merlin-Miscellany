@@ -75,6 +75,7 @@ class Merlin{
     Hooks.on("controlToken", this._onControlToken.bind(this));
     Hooks.on("updateToken", this._onUpdateToken.bind(this));
     Hooks.on("getSceneControlButtons", this._getSceneControlButtons.bind(this));
+    Hooks.on("updateTile", this._onUpdateTile.bind(this));
   }
 
   usersUseMerlinVideo = {};
@@ -118,6 +119,10 @@ class Merlin{
 
         async _processSubmitData(event, form, submitData, options = {}) {
           const merlinFlags = foundry.utils.getProperty(submitData, "flags.merlin") ?? {};
+          // Store top-left tile coords
+          const coords = game.merlin._getTileTopLeftCoords(options.x, options.y, options.width, options.height);
+          merlinFlags.topLeftX = coords.x;
+          merlinFlags.topLeftY = coords.y;
 
           // Update identifier map if teleportIdentifier changed
           if(merlinFlags.teleportIdentifier !== merlinFlags.teleportIdentifierPrev){
@@ -151,7 +156,9 @@ class Merlin{
             relativeLocation: !!merlinFlags.relativeLocation,
             teleportIdentifier: merlinFlags.teleportIdentifier ?? "",
             teleportIdentifierPrev: merlinFlags.teleportIdentifierPrev ?? "",
-            isPOI: !!merlinFlags.isPOI
+            isPOI: !!merlinFlags.isPOI,
+            topLeftX: merlinFlags.topLeftX ?? null,
+            topLeftY: merlinFlags.topLeftY ?? null
           };
           
           await super._processSubmitData(event, form, submitData, options);
@@ -172,6 +179,8 @@ class Merlin{
               teleportIdentifier: this.document.getFlag("merlin", "teleportIdentifier") ?? "",
               teleportIdentifierPrev: this.document.getFlag("merlin", "teleportIdentifierPrev") ?? "",
               isPOI: this.document.getFlag("merlin", "isPOI") ?? false,
+              topLeftX: this.document.getFlag("merlin", "topLeftX") ?? null,
+              topLeftY: this.document.getFlag("merlin", "topLeftY") ?? null
             }
           });
           return data;
@@ -278,6 +287,7 @@ class Merlin{
     // Loop through all tiles in all scenes and build our teleportTileIds map for tiles with teleport OUT enabled
     this.teleportTileIds = {};
     for(let scene of game.scenes){
+      // Also check all tiles are in the correct position due to  v13 -> v14 position fuckery
       for(let tileData of scene.tiles){
         const teleportOut = tileData.flags?.merlin?.teleportOut;
         if(teleportOut){
@@ -287,7 +297,18 @@ class Merlin{
               this.teleportTileIds[identifier] = [];
             }
             this.teleportTileIds[identifier].push([scene.id, tileData.id]);
+        const topLeftX = tileData.flags?.merlin?.topLeftX;
+        const topLeftY = tileData.flags?.merlin?.topLeftY;
+        if(topLeftX != null && topLeftY != null){
+          const coords = this._getTileCoords(topLeftX, topLeftY, tileData.width, tileData.height);
+          if(tileData.x !== coords.x || tileData.y !== coords.y){
+            tileData.update({x: coords.x, y: coords.y});
           }
+        }
+        else{
+          // If we don't have stored top-left coords, calculate and store them
+          const coords = this._getTileTopLeftCoords(tileData.x, tileData.y, tileData.width, tileData.height);
+          tileData.update({"flags.merlin.topLeftX": coords.x, "flags.merlin.topLeftY": coords.y});
         }
       }
     }
@@ -367,6 +388,29 @@ class Merlin{
     } finally {
       this._regenInProgress = false;
     }
+  }
+
+  _onUpdateTile(tileDocument, changes, options, userId){
+    if(changes.x || changes.y || changes.width || changes.height){
+      const tile = canvas.scene.tiles.get(tileDocument._id);
+      const coords = this._getTileTopLeftCoords(tileDocument.x, tileDocument.y, tileDocument.width, tileDocument.height);
+      tileDocument.update({"flags.merlin.topLeftX": coords.x});
+      tileDocument.update({"flags.merlin.topLeftY": coords.y});
+    }    
+  }
+
+  _getTileTopLeftCoords(x, y, width, height){
+    if(game.version >= 14){
+      return {x: x - width / 2, y: y - height / 2};
+    }
+    return {x, y};
+  }
+
+  _getTileCoords(topLeftX, topLeftY, width, height){
+    if(game.version >= 14){
+      return {x: topLeftX + width / 2, y: topLeftY + height / 2};
+    }
+    return {x: topLeftX, y: topLeftY};
   }
 
   async _isValidFilePath(path) {
@@ -577,8 +621,9 @@ class Merlin{
   _tileContainsPoint(tile, point) {
     const shape = tile?.document?.shape;
     if (shape?.testPoint) return shape.testPoint(point);
-    const rect = new PIXI.Rectangle(tile.x - tile.width / 2, tile.y - tile.height / 2, tile.width, tile.height);
-    return this._rectsIntersect(rect, new PIXI.Rectangle(point.x, point.y, 1, 1));
+    const topLeftCoords = game.merlin._getTileTopLeftCoords(tile.document.x, tile.document.y, tile.document.width, tile.document.height);
+    const tileRect = new PIXI.Rectangle(topLeftCoords.x, topLeftCoords.y, tile.document.width, tile.document.height);
+    return this._rectsIntersect(tileRect, new PIXI.Rectangle(point.x, point.y, 1, 1));
   }
 
   _runMerlinTileTrigger(tile, token = null, triggerType = "movement") {
@@ -659,14 +704,16 @@ class Merlin{
       }
     }
   }
+
   _checkMovementTrigger(token, tile, triggerType){    
     const prevMovement = this.prevMovementMap.get(token.document._id);
     if(!prevMovement) return false;
     const tokenWidth = token.document.width * canvas.grid.size;
     const tokenHeight = token.document.height * canvas.grid.size;
-    const tileRect = new PIXI.Rectangle(tile.x - tile.width / 2, tile.y - tile.height / 2, tile.width, tile.height);
+    const tileRect = new PIXI.Rectangle(tile.flags.merlin.topLeftX, tile.flags.merlin.topLeftY, tile.width, tile.height);    
     const destinationRect = new PIXI.Rectangle(prevMovement.destination.x, prevMovement.destination.y, tokenWidth, tokenHeight);
-    const originRect = new PIXI.Rectangle(prevMovement.origin.x, prevMovement.origin.y, tokenWidth, tokenHeight);
+    const originRect = new PIXI.Rectangle(prevMovement.origin.x, prevMovement.origin.y, tokenWidth, tokenHeight);    
+
     if(triggerType === "enter"){
       return !this._rectsIntersect(originRect, tileRect) && this._rectsIntersect(destinationRect, tileRect);
     }

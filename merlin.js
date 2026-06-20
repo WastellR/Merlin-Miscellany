@@ -81,6 +81,8 @@ class Merlin{
   usersUseMerlinVideo = {};
   // Map of tile teleportIdentifiers to tile IDs for tiles with teleport OUT enabled. An identifier can be linked to multiple tiles.
   teleportTileIds = {};
+  // Scene IDs where we have already built the base teleport tile map
+  builtTeleportTileScenes = new Set();
   
   // The scene control (left-side control buttons) that was previously active
   prevActiveControl = "";
@@ -130,18 +132,15 @@ class Merlin{
             if(merlinFlags.teleportIdentifierPrev){
               const tileIds = game.merlin.teleportTileIds[merlinFlags.teleportIdentifierPrev];
               if(tileIds){
-                const index = tileIds.indexOf(this.document.id);
-                if(index > -1){
-                  tileIds.splice(index, 1);
-                }
+                tileIds.delete(`${this.document.parent._id}:${this.document._id}`);
               }
             }
             // Add the new identifier to the map
             if(merlinFlags.teleportIdentifier && merlinFlags.teleportOut){
               if(!game.merlin.teleportTileIds[merlinFlags.teleportIdentifier]){
-                game.merlin.teleportTileIds[merlinFlags.teleportIdentifier] = [];
+                game.merlin.teleportTileIds[merlinFlags.teleportIdentifier] = new Set();
               }
-              game.merlin.teleportTileIds[merlinFlags.teleportIdentifier].push([this.document.parent._id, this.document._id]);
+              game.merlin.teleportTileIds[merlinFlags.teleportIdentifier].add(`${this.document.parent._id}:${this.document._id}`);
             }
           }
           merlinFlags.teleportIdentifierPrev = merlinFlags.teleportIdentifier;
@@ -286,17 +285,12 @@ class Merlin{
     Object.defineProperty(MerlinTileConfig.prototype.constructor, "name", { value: "MerlinTileConfig" });
     // Loop through all tiles in all scenes and build our teleportTileIds map for tiles with teleport OUT enabled
     this.teleportTileIds = {};
+    this.builtTeleportTileScenes = new Set();
     for(let scene of game.scenes){
+      this._buildTeleportTileIdsMap(scene);
+
       // Also check all tiles are in the correct position due to  v13 -> v14 position fuckery
       for(let tileData of scene.tiles){
-        const teleportOut = tileData.flags?.merlin?.teleportOut;
-        if(teleportOut){
-          const identifier = tileData.flags?.merlin?.teleportIdentifier;
-          if(identifier){
-            if(!this.teleportTileIds[identifier]){
-              this.teleportTileIds[identifier] = [];
-            }
-            this.teleportTileIds[identifier].push([scene.id, tileData.id]);
         const topLeftX = tileData.flags?.merlin?.topLeftX;
         const topLeftY = tileData.flags?.merlin?.topLeftY;
         if(topLeftX != null && topLeftY != null){
@@ -346,6 +340,8 @@ class Merlin{
     setTimeout(() => {
       this._updatePOITilesVisibility();
     }, 100);
+    
+    this._buildTeleportTileIdsMap();
 
     if(!game.user.isGM) return;
 
@@ -387,6 +383,26 @@ class Merlin{
       console.error("Thumbnail regeneration failed:", err);
     } finally {
       this._regenInProgress = false;
+    }
+  }
+
+  _buildTeleportTileIdsMap(){
+    for(let scene of game.scenes){
+      if(this.builtTeleportTileScenes.has(scene.id)) continue;
+      this.builtTeleportTileScenes.add(scene.id);
+
+      for(let tileData of scene.tiles){
+        const teleportOut = tileData.flags?.merlin?.teleportOut;
+        if(teleportOut){
+          const identifier = tileData.flags?.merlin?.teleportIdentifier;
+          if(identifier){
+            if(!this.teleportTileIds[identifier]){
+              this.teleportTileIds[identifier] = new Set();
+            }
+            this.teleportTileIds[identifier].add(`${scene.id}:${tileData.id}`);
+          }
+        }
+      }
     }
   }
 
@@ -645,14 +661,14 @@ class Merlin{
     if (!token || !merlinFlags.teleportIn) return;
 
     const identifier = merlinFlags.teleportIdentifier;
-    const destinations = this.teleportTileIds[identifier];
-    if (!destinations) return;
+    const destinations = Array.from(this.teleportTileIds[identifier] ?? []);
+    if (destinations.length === 0) return;
 
-    const destination = destinations[Math.floor(Math.random() * destinations.length)];
+    const [sceneId, tileId] = destinations[Math.floor(Math.random() * destinations.length)].split(":");
     if (!merlinFlags.relativeLocation) {
-      this.teleportTokenToTile(tile.document.parent._id, destination[0], destination[1], token.document._id);
+      this.teleportTokenToTile(tile.document.parent._id, sceneId, tileId, token.document._id);
     } else if (triggerType === "movement") {
-      this.teleportTokenToTileRelative(tile.document.parent._id, tile.document._id, destination[0], destination[1], token.document._id);
+      this.teleportTokenToTileRelative(tile.document.parent._id, tile.document._id, sceneId, tileId, token.document._id);
     }
   }
 

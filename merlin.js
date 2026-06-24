@@ -753,6 +753,7 @@ class Merlin{
   // Map of keys to filenames
   sceneBackgroundFilenames = {};
   sceneForegroundFilenames = {};
+  sceneForgroundFOWFilenames = {};
   currentBackgroundInfo = {};
   activeLevel = null;
   
@@ -832,6 +833,7 @@ class Merlin{
     hasTimes.add(backgroundInfo.time);
     this.sceneBackgroundFilenames = {};
     this.sceneForegroundFilenames = {};
+    this.sceneForgroundFOWFilenames = {};
     let key = this._getKeyFromBackgroundInfo(backgroundInfo);
     this.sceneBackgroundFilenames[key] = backgroundPath;
     let fileBackgroundInfos = {};
@@ -847,6 +849,10 @@ class Merlin{
       if(fBackgroundInfo.stem === backgroundInfo.stem){
         if(fBackgroundInfo.isFG) {
           this.sceneForegroundFilenames[this._getKeyFromBackgroundInfo(fBackgroundInfo)] = dir + "/" + f;
+          continue;
+        }
+        if(fBackgroundInfo.isFOW) {
+          this.sceneForgroundFOWFilenames[this._getKeyFromBackgroundInfo(fBackgroundInfo)] = dir + "/" + f;
           continue;
         }
         hasStatic |= !fBackgroundInfo.isVideo;
@@ -886,6 +892,31 @@ class Merlin{
         sceneForegroundFallbacks[key] = fgPath;
       }
       this.sceneForegroundFilenames = sceneForegroundFallbacks;
+    }
+
+    // Create a mapping of fallback fog images for each background, prioritizing same weather and time, then same time, then same weather, then any
+    if(Object.keys(this.sceneForgroundFOWFilenames).length > 1){
+      let sceneForgroundFOWFallbacks = {};
+      for(let key in this.sceneBackgroundFilenames){
+        const bgInfo = this._getBackgroundTypeFromFilename(this.sceneBackgroundFilenames[key].split("/").pop());
+        let fowPath = null;
+        if(this.sceneForgroundFOWFilenames[key]){
+          fowPath = this.sceneForgroundFOWFilenames[key];
+        }
+        else{
+          const sameWeatherTimeKey = this._getKeyFromBackgroundInfo(bgInfo);
+          const sameTimeKey = this._getKeyFromBackgroundInfo({ ...bgInfo, weather: "none" });
+          const sameWeatherKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day" });
+          const sameWeatherTimeVideoKey = this._getKeyFromBackgroundInfo( bgInfo, {isVideo: !bgInfo.isVideo});
+          const sameTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, weather: "none", isVideo: !bgInfo.isVideo });
+          const sameWeatherVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day", isVideo: !bgInfo.isVideo });
+          fowPath = this.sceneForgroundFOWFilenames[sameWeatherTimeKey] || this.sceneForgroundFOWFilenames[sameTimeKey] || this.sceneForgroundFOWFilenames[sameWeatherKey] 
+            || this.sceneForgroundFOWFilenames[sameWeatherTimeVideoKey] || this.sceneForgroundFOWFilenames[sameTimeVideoKey] || this.sceneForgroundFOWFilenames[sameWeatherVideoKey]
+            || Object.values(this.sceneForgroundFOWFilenames)[0] || null;
+        }
+        sceneForgroundFOWFallbacks[key] = fowPath;
+      }
+      this.sceneForgroundFOWFilenames = sceneForgroundFOWFallbacks;
     }
 
     // Determine target background for this scene
@@ -998,6 +1029,7 @@ class Merlin{
     let weatherType = "none";
     let time = "day";
     let isFG = false;
+    let isFOW = false;
     let miscSuffix = false;
     for(let s of suffixes){
       s = s.toLowerCase();      
@@ -1010,6 +1042,9 @@ class Merlin{
       else if(s === "fg"){
         isFG = true;
       }
+      else if(s === "fow"){
+        isFOW = true;
+      }
       else{
         miscSuffix = true;
       }
@@ -1018,6 +1053,7 @@ class Merlin{
     return { 
       isVideo: videoFormats.includes(ext),
       isFG: isFG,
+      isFOW: isFOW,
       weather: weatherType,
       time: time,
       miscSuffix: miscSuffix,
@@ -1138,6 +1174,9 @@ class Merlin{
       let object = { background: { src: this.sceneBackgroundFilenames[targetKey] } };
       if(this.sceneForegroundFilenames[targetKey]){
         object.foreground = this.sceneForegroundFilenames[targetKey];
+      }
+      if(this.sceneForgroundFOWFilenames[targetKey]){
+        object.fog = { overlay: this.sceneForgroundFOWFilenames[targetKey] };
       }
       if(game.version >= 14){
         this.activeLevel.update(object);

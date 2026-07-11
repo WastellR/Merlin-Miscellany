@@ -658,13 +658,28 @@ class Merlin{
       }
     }
 
+    // Deal with teleport tiles
     if (!token || !merlinFlags.teleportIn) return;
 
     const identifier = merlinFlags.teleportIdentifier;
     const destinations = Array.from(this.teleportTileIds[identifier] ?? []);
     if (destinations.length === 0) return;
 
-    const [sceneId, tileId] = destinations[Math.floor(Math.random() * destinations.length)].split(":");
+    // Make sure we don't select the tile we are already on, if there are other options
+    const checkedIndexes = new Set();
+    let [sceneId, tileId] = ["", ""];
+    while (checkedIndexes.size < destinations.length) {
+      let randomIndex = Math.floor(Math.random() * destinations.length);
+      while(checkedIndexes.has(randomIndex)) {
+        randomIndex++;
+        if(randomIndex >= destinations.length) randomIndex = 0;
+      }
+      checkedIndexes.add(randomIndex);
+      [sceneId, tileId] = destinations[randomIndex].split(":");
+      if (tileId !== tile.document._id) break;
+    }
+    if(tileId === tile.document._id || !sceneId || !tileId) return;
+
     if (!merlinFlags.relativeLocation) {
       this.teleportTokenToTile(tile.document.parent._id, sceneId, tileId, token.document._id);
     } else if (triggerType === "movement") {

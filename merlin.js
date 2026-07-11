@@ -935,14 +935,26 @@ class Merlin{
     }
 
     // Determine target background for this scene
-    if(!this.sceneMerlinWeather[canvas.scene.id]){
-      this.sceneMerlinWeather[canvas.scene.id] = backgroundInfo.weather;
+    if(this.globalMerlinWeatherEnabled){
+      if(!this.globalMerlinWeather){
+        this.globalMerlinWeather = backgroundInfo.weather;
+      }
+      if(!this.globalMerlinTime){
+        this.globalMerlinTime = backgroundInfo.time;
+      }
+      this.currentBackgroundInfo.weather = this.globalMerlinWeather;
+      this.currentBackgroundInfo.time = this.globalMerlinTime;
     }
-    this.currentBackgroundInfo.weather = this.sceneMerlinWeather[canvas.scene.id];
-    if(!this.sceneMerlinTime[canvas.scene.id]){
-      this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
+    else{
+      if(!this.sceneMerlinWeather[canvas.scene.id]){
+        this.sceneMerlinWeather[canvas.scene.id] = backgroundInfo.weather;
+      }
+      this.currentBackgroundInfo.weather = this.sceneMerlinWeather[canvas.scene.id];
+      if(!this.sceneMerlinTime[canvas.scene.id]){
+        this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
+      }
+      this.currentBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
     }
-    this.currentBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
     this.currentBackgroundInfo.isVideo = this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo;
     // Attempt to switch to it if we have a suitable background, else fall back to the current background
     if(!this._updateBackground(this.currentBackgroundInfo)){
@@ -986,6 +998,9 @@ class Merlin{
           console.log("Merlin | " + "Switching time to " + desiredBackgroundInfo.time);
           if(this._updateBackground(desiredBackgroundInfo)){
             this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;
+            if(this.globalMerlinWeatherEnabled){
+              this.globalMerlinTime = desiredBackgroundInfo.time;
+            }
           }
         }
       };
@@ -1009,6 +1024,9 @@ class Merlin{
           console.log("Merlin | " + "Switching weather to " + desiredBackgroundInfo.weather);
           if(this._updateBackground(desiredBackgroundInfo)){
             this.sceneMerlinWeather[canvas.scene.id] = desiredBackgroundInfo.weather;
+            if(this.globalMerlinWeatherEnabled){
+              this.globalMerlinWeather = desiredBackgroundInfo.weather;
+            }
           }
         }
       };
@@ -1404,4 +1422,32 @@ Hooks.once("init", () => {
     default: {}
   });
   game.merlin.usersUseMerlinVideo = game.settings.get("merlins-miscellany", "usersUseMerlinVideo");
+
+  game.settings.register("merlins-miscellany", "globalMerlinWeatherEnabled", {
+    name: "Global Merlin Weather",
+    hint: "If enabled, Merlin's weather settings will be synchronised across all scenes. If disabled, each scene can have its own weather settings. (Must refresh to take effect.)",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+  game.settings.register("merlins-miscellany", "globalMerlinWeather", {
+    name: "Global Merlin Weather String",
+    hint: "Current weather to use for all Merlin scenes.",
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
+  });
+  game.settings.register("merlins-miscellany", "globalMerlinTime", {
+    name: "Global Merlin Time String",
+    hint: "Current time to use for all Merlin scenes.",
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
+  });
+  game.merlin.globalMerlinWeatherEnabled = game.settings.get("merlins-miscellany", "globalMerlinWeatherEnabled");
+  game.merlin.globalMerlinWeather = game.settings.get("merlins-miscellany", "globalMerlinWeather");
+  game.merlin.globalMerlinTime = game.settings.get("merlins-miscellany", "globalMerlinTime");
 });

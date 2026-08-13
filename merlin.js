@@ -995,6 +995,16 @@ class Merlin{
        this.currentBackgroundInfo = backgroundInfo;
     }
 
+    // De/activate night and rain sounds if any
+    for(let sound of canvas.scene.sounds){
+      if(sound.flags?.merlin?.nightSound){
+        sound.update({hidden: this.currentBackgroundInfo.time !== "night"});
+      }
+      if(sound.flags?.merlin?.rainSound){
+        sound.update({hidden: this.currentBackgroundInfo.weather !== "rain"});
+      }
+    }
+
     if(hasAnimated && hasStatic){
       const videoButton = {
         name: "toggleMerlinVideo",

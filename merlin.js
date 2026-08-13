@@ -343,6 +343,36 @@ class Merlin{
     
     this._buildTeleportTileIdsMap();
 
+    // Hide grid outside of the background if there is padding
+    if(canvas.scene.padding > 0){
+      const padding = canvas.scene.padding;
+      const sceneWidth = canvas.dimensions.sceneWidth;
+      const sceneHeight = canvas.dimensions.sceneHeight;
+      let padX = (canvas.interface.grid.mesh._width - sceneWidth)  / 2;
+      let padY = (canvas.interface.grid.mesh._height - sceneHeight) / 2;
+      // Deal with hex column even grids (todo: other grid types)
+      if(canvas.scene.grid.type == 5){
+        // Round to nearest multiple of grid size
+        const gridY = canvas.scene.grid.size / 2;
+        const gridX = gridY * 1.1547 / 2;
+        padX = Math.round(padX / gridX) * gridX;
+        padY = Math.round(padY / gridY) * gridY;
+      }
+
+      const mask = new PIXI.Graphics();
+      mask.beginFill(0xffffff);
+      mask.drawRect(
+          padX - canvas.scene.background.offsetX,
+          padY - canvas.scene.background.offsetY,
+          sceneWidth,
+          sceneHeight
+      );
+      mask.endFill();
+
+      canvas.interface.grid.mesh.parent.addChild(mask);
+      canvas.interface.grid.mesh.mask = mask;
+    }
+
     if(!game.user.isGM) return;
 
     // If this scene has a fog mask configured, seed every user's fog the first time it is encountered.

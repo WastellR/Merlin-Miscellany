@@ -888,10 +888,12 @@ class Merlin{
     const result = await foundry.applications.apps.FilePicker.browse("data", dir);
     const filenames = result.files.map(path => path.split("/").pop());
     
+    let allValidFilenames = [];
     for(let f of filenames){      
       if(f === filename) continue;
       const fBackgroundInfo = this._getBackgroundTypeFromFilename(f);
       if(fBackgroundInfo.stem === backgroundInfo.stem){
+        allValidFilenames.push(dir + "/" + f);
         if(fBackgroundInfo.isFG) {
           this.sceneForegroundFilenames[this._getKeyFromBackgroundInfo(fBackgroundInfo)] = dir + "/" + f;
           continue;
@@ -914,6 +916,8 @@ class Merlin{
         }
       }
     }
+    canvas.scene.update({"flags.merlin.altImages": allValidFilenames});
+
     // Create a mapping of fallback foregrounds for each background, prioritizing same weather and time, then same time, then same weather, then any
     if(Object.keys(this.sceneForegroundFilenames).length > 1){
       let sceneForegroundFallbacks = {};

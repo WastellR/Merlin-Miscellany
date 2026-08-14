@@ -1,0 +1,175 @@
+.hexcrawl-left-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.hexcrawl-controls {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 2px;
+}
+
+.hexcrawl-toggle-button {
+  background: #444;
+  color: white;
+  border: 1px solid #777;
+  padding: 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  pointer-events: all;
+}
+
+.hexcrawl-toggle-button:hover {
+  text-shadow: 0 0 20px black;
+  box-shadow: 0 0 20px black;
+}
+
+.hexcrawl-toggle-button.active {
+  background: var(--control-active-bg-color);
+  border-color: var(--control-active-border-color);
+}
+
+.hexcrawl-toggle-button.active:hover {
+  text-shadow: 0 0 20px black;
+  box-shadow: 0 0 20px black;
+}
+
+.hexcrawl-begin-adventure {
+  background-color: #a9a9a985;
+  border: none;
+  color: white;
+  padding: 10px 20px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 32px;
+  margin: 15px 2px;
+  cursor: pointer;
+  border-radius: 8px; 
+  font-family: var(--dnd5e-font-modesto);
+  pointer-events: all;
+}
+.hexcrawl-begin-adventure:hover {
+  text-shadow: 0 0 20px black;
+  box-shadow: 0 0 20px black;
+}
+
+.hexcrawl-days-interface{
+  display: block;
+}
+
+.hexcrawl-days-widget {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+}
+.hexcrawl-time-widget {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  margin: -50px;
+}
+
+.hexcrawl-days-counter {
+  background-color: #00000000;
+  border: none;
+  color: white;
+  padding: 10px 20px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 48px;
+  margin: 15px 0px;
+  border-radius: 8px; 
+  font-family: var(--dnd5e-font-modesto);
+  width: 140px;
+  pointer-events: all;
+}
+.hexcrawl-time-counter {
+  background-color: #00000000;
+  border: none;
+  color: white;
+  padding: 10px 20px;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+  font-size: 24px;
+  margin: 15px 0px;
+  border-radius: 8px; 
+  font-family: var(--dnd5e-font-modesto);
+  width: 117px;
+  pointer-events: all;
+}
+
+.hexcrawl-day-button {
+    cursor: pointer;
+    pointer-events: all;
+    color: rgba(255, 255, 255, 0);
+    font-size: 40px;
+}
+.hexcrawl-day-button:hover {
+    color: white !important;
+}
+
+.hexcrawl-period-button {
+    cursor: pointer;
+    pointer-events: all;
+    color: rgba(255, 255, 255, 0);
+    font-size: 20px;
+}
+.hexcrawl-period-button:hover {
+    color: white !important;
+}
+
+.hexcrawl-weather-box {
+    border: 1px solid #888;
+    border-radius: 6px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    width: fit-content;
+    max-width: 400px;
+    overflow-wrap: break-word;
+    position: absolute;
+    bottom: 10%;
+}
+
+.hexcrawl-weather-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.hexcrawl-weather-title {
+    color: white;
+    text-align: left;
+    font-weight: bold;
+    font-size: 24px;
+    margin-bottom: 8px;
+    font-family: var(--dnd5e-font-modesto);
+    width: fit-content;
+}
+
+.hexcrawl-weather-icon {
+  color: #ffff86;
+  text-align: right;
+  position: relative;
+  top: -5px;
+  right: 5px;
+  font-size: 24px;
+}
+
+.hexcrawl-weather-list {
+    color: white;
+    text-align: left;
+    margin: 0;
+    padding-left: 20px;
+}
+
+.hexcrawl-weather-list li {
+    margin: 3px 0;
+}

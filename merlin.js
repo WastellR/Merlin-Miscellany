@@ -1,3 +1,5 @@
+import { Hexcrawl, registerHexcrawlSettings } from "./hexcrawl.js";
+
 /**
  * Light Watcher Module
  * - Adds flags to AmbientLight config
@@ -66,9 +68,10 @@ const WithActiveLightConfig = (LightConfig) => {
   return ActiveLightConfig;
 };
 
-class Merlin{
+class Merlin extends Hexcrawl{
 
   constructor() {
+    super();
     Hooks.on("ready", this._onReady.bind(this));
     Hooks.on("canvasReady", this._onCanvasReady.bind(this));
     Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
@@ -821,6 +824,9 @@ class Merlin{
     };
     controls.tokens.tools[poiButton.name] = poiButton;
 
+    this._configureHexcrawlSceneControls(controls);
+    
+
     const fogResetTool = controls.lighting?.tools?.reset;
     if (fogResetTool && !fogResetTool._merlinFogMaskWrapped) {
       fogResetTool.onChange = () => {
@@ -1090,6 +1096,29 @@ class Merlin{
         button2.click();
       }
     }
+  }
+
+  _getOrAddElement(id, parentId, isNewObj = { isNew: false }, append = true, insertBefore = null){    
+    let element = document.getElementById(id);
+    if (!element){
+      const parent = document.getElementById(parentId);
+      console.log(`Merlin | Creating new UI element with id ${id} and attaching to parent with id ${parentId}`);
+      if(!parent){
+        console.warn(`Merlin | Could not find parent element with id ${parentId} to attach ${id} to.`);
+        return null;
+      }
+      element = document.createElement("div");
+      element.id = id;
+      isNewObj.isNew = true;
+      if(append){
+        parent.appendChild(element);
+      }
+      else{
+        const insertBeforeElement = parent.querySelector("#" + insertBefore);
+        parent.insertBefore(element, insertBeforeElement || parent.firstChild);          
+      }
+    }    
+    return element;
   }
 
   _getBackgroundTypeFromFilename(filename){
@@ -1494,4 +1523,6 @@ Hooks.once("init", () => {
   game.merlin.globalMerlinWeatherEnabled = game.settings.get("merlins-miscellany", "globalMerlinWeatherEnabled");
   game.merlin.globalMerlinWeather = game.settings.get("merlins-miscellany", "globalMerlinWeather");
   game.merlin.globalMerlinTime = game.settings.get("merlins-miscellany", "globalMerlinTime");
+
+  registerHexcrawlSettings(game);
 });

@@ -126,6 +126,10 @@
     color: white !important;
 }
 
+.hexcrawl-weather-interface {
+    width: 400px;  
+}
+
 .hexcrawl-weather-box {
     border: 1px solid #888;
     border-radius: 6px;
@@ -134,8 +138,6 @@
     width: fit-content;
     max-width: 400px;
     overflow-wrap: break-word;
-    position: absolute;
-    bottom: 10%;
 }
 
 .hexcrawl-weather-header {

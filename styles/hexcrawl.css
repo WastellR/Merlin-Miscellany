@@ -13,7 +13,7 @@
 }
 
 .hexcrawl-toggle-button {
-  background: #444;
+  background: #44444477;
   color: white;
   border: 1px solid #777;
   padding: 5px;
@@ -39,9 +39,7 @@
 
 .hexcrawl-begin-adventure {
   background-color: #a9a9a985;
-  border: none;
-  color: white;
-  padding: 10px 20px;
+  padding: 8px 12px 5px 12px;
   text-align: center;
   text-decoration: none;
   display: inline-block;
@@ -51,6 +49,11 @@
   border-radius: 8px; 
   font-family: var(--dnd5e-font-modesto);
   pointer-events: all;
+  background: rgba(40, 40, 40, 0.4);
+  color: #eee;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
 }
 .hexcrawl-begin-adventure:hover {
   text-shadow: 0 0 20px black;
@@ -174,4 +177,38 @@
 
 .hexcrawl-weather-list li {
     margin: 3px 0;
+}
+
+.hexcrawl-tooltip {
+    position: fixed;
+    z-index: 10000;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.9);
+    color: white;
+    border-radius: 4px;
+    pointer-events: none;
+    display: none;
+}
+
+.hexcrawl-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: 300px;
+    padding: 8px 12px 5px 12px;
+    background: rgba(40, 40, 40, 0.4);
+    color: #eee;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);    
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1;
+    pointer-events: none;
+}
+
+.hexcrawl-tooltip-title {
+    font-family: var(--dnd5e-font-modesto);
+    font-weight: bold;
+    margin-bottom: 4px;
+    font-size: 24px;
 }

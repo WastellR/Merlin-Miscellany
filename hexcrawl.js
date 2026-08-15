@@ -1,25 +1,115 @@
 export class Hexcrawl {
-  _configureHexcrawlSceneControls(controls) {    
+  bAddedBoardListeners = false;
+  hexcrawlTerrainImages = new Map();
 
-    // Add hexcrawl UI toggle button if we are in a hexcrawl scene
-    if (canvas.scene?.flags?.merlin?.hexcrawl) {
-      const hexcrawlButton = {
-        name: "toggleHexcrawlUI",
-        title: "Toggle Hexcrawl UI",
-        icon: "fas fa-map",
-        toggle: true,
-        active: this.showHexcrawlUI,
-        onClick: (toggle) => {
-          this.showHexcrawlUI = toggle;
-          game.settings.set("merlins-miscellany", "showHexcrawlUI", toggle);
-          this._showHexcrawlUI(toggle);
-        },
-        button: true
-      };
-      controls.tokens.tools[hexcrawlButton.name] = hexcrawlButton;
+  standardTerrains = new Map();  
+  standardTerrainNavDCs = new Map();
+  jungleTerrains = new Map();
+  jungleTerrainNavDCs = new Map();
+
+  constructor() {
+    this.standardTerrains.set("10", "Grassland");
+    this.standardTerrains.set("20", "Hills");
+    this.standardTerrains.set("30", "Forest");
+    this.standardTerrainNavDCs.set("10", 5);
+    this.standardTerrainNavDCs.set("20", 10);
+    this.standardTerrainNavDCs.set("30", 15);
+
+    this.jungleTerrains.set("10","Coast");
+    this.jungleTerrains.set("20", "Jungle");
+    this.jungleTerrains.set("30", "Mountain");
+    this.jungleTerrains.set("40", "Swamp");
+    this.jungleTerrains.set("50", "Wasteland");
+    this.jungleTerrains.set("60", "Desert");
+    this.jungleTerrainNavDCs.set("10", 10);
+    this.jungleTerrainNavDCs.set("20", 15);
+    this.jungleTerrainNavDCs.set("30", 15);
+    this.jungleTerrainNavDCs.set("40", 15);
+    this.jungleTerrainNavDCs.set("50", 15);
+    this.jungleTerrainNavDCs.set("60", 15);
+  }
+
+  _configureHexcrawlSceneControls(controls) {
+    // Add hexcrawl UI only if we are in a hexcrawl scene
+    if (!canvas.scene?.flags?.merlin?.hexcrawl) return;
+    // Add hexcrawl UI toggle button
+    const hexcrawlButton = {
+      name: "toggleHexcrawlUI",
+      title: "Toggle Hexcrawl UI",
+      icon: "fas fa-map",
+      toggle: true,
+      active: this.showHexcrawlUI,
+      onClick: (toggle) => {
+        this.showHexcrawlUI = toggle;
+        game.settings.set("merlins-miscellany", "showHexcrawlUI", toggle);
+        this._showHexcrawlUI(toggle);
+      },
+      button: true
+    };
+    controls.tokens.tools[hexcrawlButton.name] = hexcrawlButton;
+    this._showHexcrawlUI(this.showHexcrawlUI);
+
+    // Add canvas hover tooltip
+    if(this.bAddedBoardListeners) return;
+    let tooltipTimer = null;
+    let tooltip = null;
+    const board = document.querySelector("#board");
+    board.addEventListener("mousemove", handleMouseMove);
+    board.addEventListener("mouseleave", handleMouseLeave);
+    this.bAddedBoardListeners = true;
+        
+    async function handleMouseMove(event) {      
+      clearTimeout(tooltipTimer);
+      hideTooltip();
+      if (!game.merlin.showHexcrawlUI) return;
+      if (!canvas.scene?.flags?.merlin?.hexcrawl) return;
+      if (!canvas.scene?.flags?.merlin?.hexcrawlTerrain) return;      
+      if (!game.merlin.hexcrawlTerrainImages.has(canvas.scene.flags.merlin.hexcrawlTerrain)) {
+        const newTerrainTexture = await game.merlin._loadTexture(canvas.scene.flags.merlin.hexcrawlTerrain);
+        if(newTerrainTexture){
+          game.merlin.hexcrawlTerrainImages.set(canvas.scene.flags.merlin.hexcrawlTerrain, newTerrainTexture.baseTexture.resource);
+        }
+      }
+      if(!game.merlin.hexcrawlTerrainImages.has(canvas.scene.flags.merlin.hexcrawlTerrain)) return;
+      const { x, y } = canvas.app.renderer.events.pointer.getLocalPosition(canvas.stage);
+      if(!game.user.isGM && !canvas.fog.isPointExplored({x, y})) return;
+      
+      tooltipTimer = setTimeout(() => {        
+        showTooltip(event.clientX, event.clientY, x, y);
+      }, 1000);
     }
 
-    this._showHexcrawlUI(canvas.scene?.flags?.merlin?.hexcrawl == true && this.showHexcrawlUI);
+    function handleMouseLeave() {
+      clearTimeout(tooltipTimer);
+      hideTooltip();
+    }
+
+    function showTooltip(screenX, screenY, canvasX, canvasY) {
+      if (!tooltip) {
+        tooltip = document.createElement("div");
+        tooltip.classList.add("hexcrawl-tooltip");
+        document.body.appendChild(tooltip);
+      }
+      const pixel = game.merlin._getPixel(canvasX, canvasY);
+      const terrain = game.merlin._getTerrainStrings(pixel);
+      if(terrain.title === "None") return;
+
+      tooltip.innerHTML = `
+        <div class="hexcrawl-tooltip-title">${terrain.title}</div>
+        ${terrain.water != "None" && terrain.water != terrain.title ? `<div>${terrain.water}</div>` : ""}
+        ${terrain.special != "None" ? `<div>${terrain.special}</div>` : ""}
+      `;
+      tooltip.style.left = `${screenX + 15}px`;
+      tooltip.style.top = `${screenY + 15}px`;
+      tooltip.style.display = "block";
+      //tooltip.textContent = canvasX + ", " + canvasY;
+    }
+
+    function hideTooltip() {
+        if (tooltip) {
+            tooltip.style.display = "none";
+        }
+    }
   }
 
   _showHexcrawlUI(show = true) {
@@ -248,7 +338,7 @@ export class Hexcrawl {
     const [temperature, wind, precipitation, special] = weatherCode.split("");
 
     // Determine effects
-    switch (this.hexcrawlClimate) {
+    switch (this._getClimate()) {
       case "standard":
         // todo
       case "frigid":
@@ -280,7 +370,7 @@ export class Hexcrawl {
     }
 
     if (special != "a") {
-      switch (this.hexcrawlClimate) {
+      switch (this._getClimate()) {
         case "standard":
           // todo
         case "frigid":
@@ -300,7 +390,7 @@ export class Hexcrawl {
 
     // Determine title
     weatherStrings.title = "Clear Skies";
-    switch (this.hexcrawlClimate) {
+    switch (this._getClimate()) {
       case "standard":
         // todo
       case "frigid":
@@ -393,7 +483,7 @@ export class Hexcrawl {
     let wind = "a";
     let precipitation = "a";
     let special = "a";
-    switch (this.hexcrawlClimate) {
+    switch (this._getClimate()) {
       case "standard":
         if (results[0] <= 14) {
           temperature = "a";
@@ -470,9 +560,75 @@ export class Hexcrawl {
     return timeString;
   }
 
+  _getTerrainStrings(pixel) {
+    let terrain = {};
+    terrain.title = "None";
+    terrain.water = "None";
+    terrain.special = "None";
+    // Determine water type
+    switch(pixel[0].toString(16)){
+      case "10": terrain.water = "River"; break;
+      case "20": terrain.water = "Lake"; break;
+      case "30": terrain.water = "Ocean"; break;
+    }    
+    if(pixel[2].toString(16) === "0" && pixel[0].toString(16) != "0"){
+      terrain.title = terrain.water;
+    }
+    switch(game.merlin._getClimate()){
+      case "standard":
+        if(this.standardTerrains.has(pixel[2].toString(16))) {
+          terrain.title = this.standardTerrains.get(pixel[2].toString(16));        
+        }
+        break;
+      case "frigid":
+        // todo
+      case "jungle":
+        switch(pixel[1].toString(16)){
+          case "10": terrain.special = "Lesser Undead"; break;
+          case "20": terrain.special = "Greater Undead"; break;
+        }
+        if(this.jungleTerrains.has(pixel[2].toString(16))) {
+          terrain.title = this.jungleTerrains.get(pixel[2].toString(16));
+        }
+        break;
+    }
+    return terrain;
+  }
+
+  _getAvailableTerrains() {
+    switch(game.merlin._getClimate()){
+      case "standard":
+        return this.standardTerrains;
+      case "frigid":
+        // todo
+      case "jungle":
+        return this.jungleTerrains;
+    }
+  }
+
   _crawlSetTime() {
     let timeCounter = document.getElementById("hexcrawl-time-counter");
     timeCounter.innerHTML = `<div class="hexcrawl-time-counter"><span>${this._getTimeofDayString(this.hexcrawlTime)}</span></div>`;
+  }
+
+  _getClimate() {
+    if(canvas.scene?.flags?.merlin?.hexcrawlClimate){
+      return canvas.scene?.flags?.merlin?.hexcrawlClimate;
+    }
+    return game.merlin.hexcrawlDefaultClimate;
+  }
+  _getPixel(x, y) {
+    const image = game.merlin.hexcrawlTerrainImages.get(canvas.scene.flags.merlin.hexcrawlTerrain);
+    if (x < 0 || y < 0 || x >= image._width || y >= image._height) {
+      return null;
+    }
+
+    const imageCanvas = document.createElement("canvas");
+    imageCanvas.width = 1;
+    imageCanvas.height = 1;
+    const ctx = imageCanvas.getContext("2d");
+    ctx.drawImage(image.source, x, y, 1, 1, 0, 0, 1, 1);
+    return ctx.getImageData(0, 0, 1, 1).data;
   }
 }
 

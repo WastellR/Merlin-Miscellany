@@ -336,6 +336,7 @@ class Merlin extends Hexcrawl{
         });
       });
     }
+
   }
 
   async _onCanvasReady(canvas) {
@@ -766,6 +767,8 @@ class Merlin extends Hexcrawl{
           console.error("Merlin | Error processing tile:", err);
         }
       }
+
+      this._hexcrawlOnUpdateToken(movement.destination, token.width, token.height);
     }
   }
 
@@ -865,6 +868,7 @@ class Merlin extends Hexcrawl{
     // Split into directory + filename
     if(!canvas.scene) return;
     let backgroundPath = canvas.scene.background.src;
+    if(!backgroundPath) return;
     this.activeLevel = null;
     // Handle multilevel scenes in 14+
     if(game.version >= 14){
@@ -1102,7 +1106,6 @@ class Merlin extends Hexcrawl{
     let element = document.getElementById(id);
     if (!element){
       const parent = document.getElementById(parentId);
-      console.log(`Merlin | Creating new UI element with id ${id} and attaching to parent with id ${parentId}`);
       if(!parent){
         console.warn(`Merlin | Could not find parent element with id ${parentId} to attach ${id} to.`);
         return null;

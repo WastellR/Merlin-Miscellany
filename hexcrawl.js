@@ -128,6 +128,9 @@ export class Hexcrawl {
           if(this.hexcrawlPopup && this.hexcrawlMainInterfaceVisible){
             this.hexcrawlPopup.render(true);
           }
+          this.hexcrawlNavigationInterfaceVisible = true;
+          this.hexcrawlNavigationControlsVisible = false;
+          this._updateNavigationUI();
         });
       }
       beginAdventure.style.display = this.hexcrawlDays === 0 && show ? "flex" : "none";
@@ -139,7 +142,14 @@ export class Hexcrawl {
       hexcrawlLeftColumn.style.display = this.hexcrawlDays > 0 && show ? "flex" : "none";
     }
 
-    // Weather interface
+    // Navigation interface
+    let hexcrawlNavigationInterface = this._getOrAddElement("hexcrawl-navigation-interface", "hexcrawl-left-column");
+    if (hexcrawlNavigationInterface) {
+      hexcrawlNavigationInterface.className = "hexcrawl-navigation-interface";
+      hexcrawlNavigationInterface.style.display = this.hexcrawlNavigationInterfaceVisible ? "block" : "none";
+      this._updateNavigationUI();
+    }
+
     let hexcrawlWeatherInterface = this._getOrAddElement("hexcrawl-weather-interface", "hexcrawl-left-column");
     if (hexcrawlWeatherInterface) {
       hexcrawlWeatherInterface.className = "hexcrawl-weather-interface";
@@ -155,13 +165,13 @@ export class Hexcrawl {
     let hexcrawlControlPanelButton = this._getOrAddElement("hexcrawl-control-panel-button", "hexcrawl-controls");
     if (hexcrawlControlPanelButton) {
       hexcrawlControlPanelButton.className = "hexcrawl-toggle-button icon fa-solid fa-hexagon";
-      if(!this.hexcrawlPopup){
-        this.hexcrawlPopup = new HexcrawlPopup();            
+      if (!this.hexcrawlPopup) {
+        this.hexcrawlPopup = new HexcrawlPopup();
       }
       if (this.hexcrawlMainInterfaceVisible) {
         hexcrawlControlPanelButton.classList.add("active");
         this.hexcrawlPopup.render(this.hexcrawlDays > 0);
-      }      
+      }
       if (obj.isNew) {
         hexcrawlControlPanelButton.addEventListener("click", () => {
           if(this.hexcrawlPopup){
@@ -194,6 +204,21 @@ export class Hexcrawl {
           if (hexcrawlWeatherInterface) {
             hexcrawlWeatherInterface.style.display = this.hexcrawlWeatherInterfaceVisible ? "block" : "none";
           }
+        });
+      }
+    }
+    let hexcrawlNavigationButton = this._getOrAddElement("hexcrawl-navigation-button", "hexcrawl-controls");
+    if (hexcrawlNavigationButton) {
+      hexcrawlNavigationButton.className = "hexcrawl-toggle-button icon fa-solid fa-route";
+      if (this.hexcrawlNavigationInterfaceVisible) {
+        hexcrawlNavigationButton.classList.add("active");
+      }
+      if (obj.isNew) {
+        hexcrawlNavigationButton.addEventListener("click", () => {
+          this.hexcrawlNavigationInterfaceVisible = !this.hexcrawlNavigationInterfaceVisible;
+          game.settings.set("merlins-miscellany", "hexcrawlNavigationInterfaceVisible", this.hexcrawlNavigationInterfaceVisible);
+          hexcrawlNavigationButton.classList.toggle("active", this.hexcrawlNavigationInterfaceVisible);
+          this._updateNavigationUI();
         });
       }
     }
@@ -302,6 +327,7 @@ export class Hexcrawl {
   async _crawlNextDay() {
     this.hexcrawlDays++;
     this.hexcrawlTime = 0;
+    this.hexcrawlNavigationControlsVisible = false;
     const numPeriods = this._getHexcrawlPeriodsLength() - this.hexcrawlWeatherLog.length;
     // Generate next day of weather
     for (let i = 0; i < numPeriods; i++) {
@@ -317,6 +343,7 @@ export class Hexcrawl {
     if (this.hexcrawlDays <= 1) return;
     this.hexcrawlDays--;
     this.hexcrawlTime = 0;
+    this.hexcrawlNavigationControlsVisible = false;
     this._updateDaysUI();
     this._updateWeatherUI();
   }
@@ -339,6 +366,7 @@ export class Hexcrawl {
     if (this.hexcrawlTime <= 0) {
       this.hexcrawlDays--;
       this.hexcrawlTime = 2;
+      this.hexcrawlNavigationControlsVisible = false;
     } else {
       this.hexcrawlTime--;
     }
@@ -466,6 +494,7 @@ export class Hexcrawl {
     let daysCounter = document.getElementById("hexcrawl-days-counter");
     daysCounter.innerHTML = `<div class="hexcrawl-days-counter"><span>Day ${this.hexcrawlDays}</span></div>`;
     this._crawlSetTime();
+    this._updateNavigationUI();
   }
 
   _updateWeatherUI() {
@@ -490,6 +519,294 @@ export class Hexcrawl {
         </div>
       `;
     }
+  }
+
+  speedSelection = 1;
+  terrainSelection = "";
+  navDC = 10;
+  navMod = 0;
+
+  _getNavigationDayKey(day = this.hexcrawlDays) {
+    return `${day}`;
+  }
+
+  _getNavigationResult(day = this.hexcrawlDays) {
+    return game.merlin.hexcrawlNavigationResults?.[this._getNavigationDayKey(day)] ?? null;
+  }
+
+  async _setNavigationResult(day, result) {
+    const results = { ...(game.merlin.hexcrawlNavigationResults ?? {}) };
+    const dayKey = this._getNavigationDayKey(day);
+    if (result) {
+      results[dayKey] = result;
+    } else {
+      delete results[dayKey];
+    }
+
+    game.merlin.hexcrawlNavigationResults = results;
+    //await game.settings.set("merlins-miscellany", "hexcrawlNavigationResults", results);
+    this.hexcrawlNavigationControlsVisible = false;
+    this._updateNavigationUI();
+  }
+
+  _updateNavigationUI() {
+    const navigationResult = this._getNavigationResult();
+    const hexcrawlNavigationInterface = document.getElementById("hexcrawl-navigation-interface");
+    if (!hexcrawlNavigationInterface) return;
+
+    const showControls = !navigationResult || this.hexcrawlNavigationControlsVisible;
+    const toggleButton = navigationResult
+      ? `
+        <button type="button" class="hexcrawl-navigation-toggle" aria-label="${showControls ? "Cancel" : "Reroll"}">
+          <i class="fas fa-${showControls ? "xmark" : "rotate-right"}"></i>
+        </button>
+      `
+      : "";
+
+    hexcrawlNavigationInterface.innerHTML = `
+      <div class="hexcrawl-navigation-box">
+        <div class="hexcrawl-navigation-header">
+          <div class="hexcrawl-navigation-title-row">
+            <div class="hexcrawl-navigation-title">Navigation</div>
+            ${toggleButton}
+          </div>
+        </div>
+        <div class="hexcrawl-navigation-body">
+          ${showControls ? this._renderNavigationControls() : this._renderNavigationResults(navigationResult)}
+        </div>
+      </div>
+    `;
+    hexcrawlNavigationInterface.style.display = this.hexcrawlNavigationInterfaceVisible ? "block" : "none";
+
+    const toggle = hexcrawlNavigationInterface.querySelector(".hexcrawl-navigation-toggle");
+    if (toggle) {
+      game.merlin._addCustomTooltip(toggle, showControls ? "cancel" : "reroll");
+      toggle.addEventListener("click", () => {
+        this.hexcrawlNavigationControlsVisible = !this.hexcrawlNavigationControlsVisible;
+        this._updateNavigationUI();
+      });
+    }
+
+    if (showControls) {
+      this._bindNavigationControls(hexcrawlNavigationInterface);
+    }
+  }
+
+  _renderNavigationResults(navigationResult) {
+    const lost = navigationResult.lost ? "Yes" : "No";
+    const movementDistance = navigationResult.movementDistance >= 0
+      ? `+${navigationResult.movementDistance}`
+      : `${navigationResult.movementDistance}`;
+    const perceptionModifier = navigationResult.perceptionModifier >= 0
+      ? `+${navigationResult.perceptionModifier}`
+      : `${navigationResult.perceptionModifier}`;
+
+    return `
+      <ul class="hexcrawl-navigation-list">
+        <li><span class="hexcrawl-navigation-label">Lost:</span> ${lost}</li>
+        <li><span class="hexcrawl-navigation-label">Movement distance:</span> ${movementDistance}</li>
+        <li><span class="hexcrawl-navigation-label">Perception modifier:</span> ${perceptionModifier}</li>
+      </ul>
+    `;
+  }
+
+  _renderNavigationControls() {
+    const terrains = this._getAvailableTerrains();
+    const terrainSelection = this._getNavigationTerrainSelection();
+    this.terrainSelection = terrainSelection;
+    const navigatorSelected = !!game.merlin.hexcrawlNavigatorId;
+    const actors = Array.from(game.actors).sort((a, b) => {
+      const aIsPC = a.type === "character";
+      const bIsPC = b.type === "character";
+      if (aIsPC !== bIsPC) {
+        return aIsPC ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return `
+      <div class="hexcrawl-navigation-controls">
+        <div class="hexcrawl-terrain-selection">
+          <select>
+            ${[...terrains].map(([key, value]) => `
+              <option value="${key}" ${key === terrainSelection ? "selected" : ""}>
+                ${value}
+              </option>
+            `).join("")}
+          </select>
+        </div>
+
+        <div class="hexcrawl-speed-selection">
+          <label>
+            <input type="radio" name="speed" value="slow" ${this.speedSelection === 0 ? "checked" : ""}>
+            Slow
+          </label>
+          <label>
+            <input type="radio" name="speed" value="normal" ${this.speedSelection === 1 ? "checked" : ""}>
+            Normal
+          </label>
+          <label>
+            <input type="radio" name="speed" value="fast" ${this.speedSelection === 2 ? "checked" : ""}>
+            Fast
+          </label>
+        </div>
+
+        <div class="hexcrawl-character-selection">
+          <select>
+            <option value="" disabled ${navigatorSelected ? "" : "selected"}>Select Navigator</option>
+            ${actors.map(actor => `
+              <option value="${actor.id}" ${actor.id === game.merlin.hexcrawlNavigatorId ? "selected" : ""}>
+                ${actor.name}
+              </option>
+            `).join("")}
+          </select>
+        </div>
+
+        <div class="hexcrawl-navmod-info" id="hexcrawl-navmod-info"></div>
+
+        <div class="hexcrawl-navigation-action">
+          <button type="button">Navigate</button>
+        </div>
+
+        <div class="hexcrawl-navdc-info" id="hexcrawl-navdc-info"></div>
+      </div>
+    `;
+  }
+
+  _getNavigationTerrainSelection() {
+    if (this.terrainSelection) return this.terrainSelection;
+    if (canvas.scene?.tokens?.size > 0) {
+      const token = canvas.scene.tokens.contents[0];
+      let centre = {};
+      if (game.merlin.lastTokenMovement != null) {
+        centre = {
+          x: game.merlin.lastTokenMovement.destination.x + (game.merlin.lastTokenMovement.width / 2),
+          y: game.merlin.lastTokenMovement.destination.y + (game.merlin.lastTokenMovement.height / 2)
+        };
+      } else {
+        centre = {
+          x: token.x + (token.width * canvas.grid.sizeX / 2),
+          y: token.y + (token.height * canvas.grid.sizeY / 2)
+        };
+      }
+      const pixel = game.merlin._getPixel(centre.x, centre.y);
+      if (pixel) return pixel[2].toString(16);
+    }
+    const terrains = game.merlin._getAvailableTerrains?.();
+    const firstTerrain = terrains ? [...terrains.keys()][0] : "";
+    return firstTerrain || "";
+  }
+
+  _bindNavigationControls(container) {
+    const terrainSelect = container.querySelector(".hexcrawl-terrain-selection select");
+    if (terrainSelect) {
+      terrainSelect.addEventListener("change", (event) => {
+        this.terrainSelection = event.target.value;
+        this.updateNavDC();
+      });
+    }
+
+    container.querySelectorAll('input[name="speed"]').forEach(radio => {
+      radio.addEventListener("change", (event) => {
+        if (event.target.value === "slow") {
+          this.speedSelection = 0;
+        } else if (event.target.value === "normal") {
+          this.speedSelection = 1;
+        } else if (event.target.value === "fast") {
+          this.speedSelection = 2;
+        }
+        this.updateNavModifier();
+      });
+    });
+
+    const select = container.querySelector(".hexcrawl-character-selection select");
+    if (select) {
+      select.addEventListener("change", (event) => {
+        game.merlin.hexcrawlNavigatorId = event.target.value;
+        game.settings.set("merlins-miscellany", "hexcrawlNavigatorId", game.merlin.hexcrawlNavigatorId);
+        this.updateNavModifier();
+      });
+      select.value = game.merlin.hexcrawlNavigatorId;
+    }
+
+    const modifierInfo = container.querySelector(".hexcrawl-navmod-info");
+    if (modifierInfo) {
+      this.navModifierTooltip = game.merlin._addCustomTooltip(modifierInfo, "");
+      this.updateNavModifier(modifierInfo);
+    }
+
+    const dcInfo = container.querySelector(".hexcrawl-navdc-info");
+    if (dcInfo) {
+      this.updateNavDC(dcInfo);
+    }
+
+    const navigate = container.querySelector(".hexcrawl-navigation-action");
+    if (navigate && !navigate.dataset.bound) {
+      navigate.dataset.bound = "true";
+      navigate.addEventListener("click", async () => {
+        const roll = await new Roll(`1d20 + ${this.navMod}`).evaluate();
+        const navigation = roll.dice[0].results[0].result;
+        const bonusMove = this.speedSelection === 1 ? null : (await new Roll("1d4").evaluate()).total;
+        const success = navigation + this.navMod >= this.navDC;
+        const Day = game.merlin.hexcrawlDays;
+        const movementDistance = this.speedSelection === 0
+          ? (bonusMove !== null && bonusMove <= 2 ? -1 : 0)
+          : this.speedSelection === 2
+            ? (bonusMove !== null && bonusMove >= 3 ? 1 : 0)
+            : 0;
+        const perceptionModifier = this.speedSelection === 0 ? 5 : this.speedSelection === 2 ? -5 : 0;
+        let flavor = "Navigation Check | Day " + Day + ", DC " + this.navDC + ": " + (success ? "Navigation Successful!" : "Lost!");
+        if (movementDistance < 0) {
+          flavor += " -1 Movement";
+        } else if (movementDistance > 0) {
+          flavor += " +1 Movement";
+        }
+        await game.merlin._setNavigationResult(Day, {
+          lost: !success,
+          movementDistance,
+          perceptionModifier
+        });
+        await roll.toMessage({ flavor });
+      });
+    }
+  }
+
+  updateNavModifier(navModifier = null) {      
+    let speed = 0;
+    if(this.speedSelection == 0) speed = 5;
+    else if(this.speedSelection == 2) speed = -5;
+
+    const navigator = game.actors.get(game.merlin.hexcrawlNavigatorId);
+    const navigatorMod = navigator?.system?.skills?.sur?.total ?? 0;
+
+    const weatherCode = game.merlin.hexcrawlWeatherLog.at(game.merlin._getHexcrawlPeriodsLength() - 1);
+    const disadvantage = weatherCode ? weatherCode.endsWith("b") : false;
+
+    this.navMod = speed + navigatorMod;
+
+    let tooltip = speed + " (Travel Speed) + " + navigatorMod + " (" + (navigator?.name ?? "No Navigator") + ")";
+    if(disadvantage){
+      tooltip += ", at Disadvantage (Weather)";
+    }
+
+    if(!navModifier){
+      navModifier = document.getElementById("hexcrawl-navmod-info");
+    }
+    if(navModifier) {
+      navModifier.textContent = (this.navMod > 0 ? "+" : "") + this.navMod;
+      if (this.navModifierTooltip) {
+        this.navModifierTooltip.textContent = tooltip;
+      }
+    }
+  }
+
+  updateNavDC(navDC = null) {
+    if(!navDC){
+      navDC = document.getElementById("hexcrawl-navdc-info");
+    }
+    if(!navDC) return;
+    this.navDC = game.merlin.jungleTerrainNavDCs.get(this.terrainSelection) ?? 10;
+    navDC.textContent = "DC " + this.navDC;      
   }
 
   async _crawlNextPeriodWeather() {
@@ -641,15 +958,15 @@ export class Hexcrawl {
 
   lastTokenMovement = null;
   async _hexcrawlOnUpdateToken(destination, width, height) {
-    if(this.hexcrawlPopup && this.hexcrawlMainInterfaceVisible && this.hexcrawlDays > 0){
-      this.lastTokenMovement = {destination: destination, width: width, height: height};
-      await this.hexcrawlPopup.render(true);
-      this.lastTokenMovement = null;
-    }
+    if (this.hexcrawlDays <= 0) return;
+    this.lastTokenMovement = {destination: destination, width: width, height: height};
+    this._updateNavigationUI();
+    this.lastTokenMovement = null;
   }
 
   _getPixel(x, y) {
     const image = game.merlin.hexcrawlTerrainImages.get(canvas.scene.flags.merlin.hexcrawlTerrain);
+    if (!image) return null;
     if (x < 0 || y < 0 || x >= image._width || y >= image._height) {
       return null;
     }
@@ -695,30 +1012,11 @@ export class Hexcrawl {
 }
 
 class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
-    speedSelection = 1;
-    terrainSelection = "";
-    navDC = 10;
-    navMod = 0;
-    actors = [];
 
     constructor(options = {}) {
       super(options);
-      this.actors = Array.from(game.actors);
-
-      this.actors.sort((a, b) => {
-        // PCs first
-        const aIsPC = a.type === "character";
-        const bIsPC = b.type === "character";
-
-        if (aIsPC !== bIsPC) {
-            return aIsPC ? -1 : 1;
-        }
-
-        // Alphabetical within each group
-        return a.name.localeCompare(b.name);
-      });
     }
-
+  
     static DEFAULT_OPTIONS = {
         id: "hexcrawl-popup",
         classes: ["hexcrawl-popup"],
@@ -734,7 +1032,7 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
 
     async _onClose(options) {
         const popupButton = document.getElementById("hexcrawl-control-panel-button");
-        if(popupButton){
+        if (popupButton) {
           popupButton.classList.toggle("active");
           game.merlin.hexcrawlMainInterfaceVisible = false;
           game.settings.set("merlins-miscellany", "hexcrawlMainInterfaceVisible", game.merlin.hexcrawlMainInterfaceVisible);
@@ -743,174 +1041,14 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
 
     async _renderHTML(context, options) {
         return `
-            <div class="hexcrawl-navigation">
-              <div class="hexcrawl-terrain-selection">                  
-              </div>
-              <div class="hexcrawl-speed-selection">
-                  <label>
-                      <input type="radio" name="speed" value="slow" ${this.speedSelection === 0 ? "checked" : ""}>
-                      Slow
-                  </label>
-
-                  <label>
-                      <input type="radio" name="speed" value="normal" ${this.speedSelection === 1 ? "checked" : ""}>
-                      Normal
-                  </label>
-
-                  <label>
-                      <input type="radio" name="speed" value="fast" ${this.speedSelection === 2 ? "checked" : ""}>
-                      Fast
-                  </label>
-              </div>
-
-              <div class="hexcrawl-character-selection">                  
-              </div>
-
-              <div class="hexcrawl-navmod-info" id="hexcrawl-navmod-info">                  
-              </div>
-
-              <div class="hexcrawl-navigation-action">
-                  <button type="button">Navigate</button>
-              </div>
-
-              <div class="hexcrawl-navdc-info" id="hexcrawl-navdc-info">
-              </div>
-
+            <div class="hexcrawl-navigation-box">
+              <p>Hexcrawl controls have moved to the navigation panel.</p>
             </div>
         `;
     }
 
     _replaceHTML(result, content, options) {
-        content.innerHTML = result;
-
-        const terrains = game.merlin._getAvailableTerrains();
-        const terrainSelect = content.querySelector(".hexcrawl-terrain-selection");
-        terrainSelect.innerHTML = `
-          <select>              
-              ${[...terrains].map(([key, value]) => `
-                  <option value="${key}">
-                      ${value}
-                  </option>
-              `).join("")}
-          </select>
-        `;
-        // Automatically set the terrain to the first token found on the map
-        if(canvas.scene.tokens.size > 0){
-          const token = canvas.scene.tokens.contents[0];
-          let centre = {};
-          if(game.merlin.lastTokenMovement != null){
-            centre = {x: game.merlin.lastTokenMovement.destination.x + (game.merlin.lastTokenMovement.width / 2)
-              , y: game.merlin.lastTokenMovement.destination.y + (game.merlin.lastTokenMovement.height / 2)};
-            
-          }
-          else {
-            centre = {x: token.x + (token.width * canvas.grid.sizeX / 2), y: token.y + (token.height * canvas.grid.sizeY / 2)}
-          }
-          const pixel = game.merlin._getPixel(centre.x, centre.y);
-          const terrain = game.merlin._getTerrainStrings(pixel);
-          const selectInner = terrainSelect.querySelector("select");
-          this.terrainSelection = pixel[2].toString(16)
-          selectInner.value = this.terrainSelection;
-        }
-        terrainSelect.addEventListener("change", (event) => {          
-          this.updateNavDC();
-        });
-        
-        content.querySelectorAll('input[name="speed"]').forEach(radio => {
-          radio.addEventListener("change", (event) => {
-            if (event.target.value === "slow") {
-              this.speedSelection = 0;
-            }
-            else if (event.target.value === "normal") {
-              this.speedSelection = 1;
-            }
-            else if (event.target.value === "fast") {
-              this.speedSelection = 2;
-            }
-
-            this.updateNavModifier();
-          });
-        });        
-
-        const select = content.querySelector(".hexcrawl-character-selection");
-        select.innerHTML = `
-            <select>
-            <option value="" disabled selected>Select Navigator</option>
-            ${this.actors.map(actor => `
-                <option value="${actor.id}">
-                    ${actor.name}
-                </option>
-            `).join("")}
-            </select>
-        `;
-        select.addEventListener("change", (event) => {
-          game.merlin.hexcrawlNavigatorId = event.target.value;
-          game.settings.set("merlins-miscellany", "hexcrawlNavigatorId", game.merlin.hexcrawlNavigatorId);
-          this.updateNavModifier();
-        });
-        const selectInner = select.querySelector("select");
-        selectInner.value = game.merlin.hexcrawlNavigatorId;
-
-        const modifierInfo = content.querySelector(".hexcrawl-navmod-info");
-        this.navModifierTooltip = game.merlin._addCustomTooltip(modifierInfo, "");
-        this.updateNavModifier(modifierInfo);
-
-        const dcInfo = content.querySelector(".hexcrawl-navdc-info");
-        this.updateNavDC(dcInfo);
-
-        const navigate = content.querySelector(".hexcrawl-navigation-action");
-        navigate.addEventListener("click", async (event) => {          
-          const roll = await new Roll(`1d20 + ${this.navMod}${this.speedSelection != 1 ? " + (0 * 1d4)" : ""}`).evaluate();
-          const navigation = roll.dice[0].results[0].result;
-          const bonusMove = roll.dice[1].results[0].result;
-          const success = navigation + this.navMod >= this.navDC;
-          const Day = Math.floor((game.merlin.hexcrawlWeatherLog.length - 1) / 3) + 1;
-          let flavor = "Navigation Check | Day " + Day + ", DC " + this.navDC + ": " + (success ? "Navigation Successful!" : "Lost!");
-          if(this.speedSelection == 0 && bonusMove <= 2) {
-            flavor += " -1 Movement";
-          }
-          else if(this.speedSelection == 2 && bonusMove >= 3) {
-            flavor += " +1 Movement";
-          }
-          await roll.toMessage({
-              flavor: flavor
-          });
-        });
-    }
-
-    navModifierTooltip = {};
-    updateNavModifier(navModifier = null) {      
-      let speed = 0;
-      if(this.speedSelection == 0) speed = 5;
-      else if(this.speedSelection == 2) speed = -5;
-
-      const navigator = game.actors.get(game.merlin.hexcrawlNavigatorId);
-      const navigatorMod = navigator.system.skills.sur.total;
-
-      const weatherCode = game.merlin.hexcrawlWeatherLog.at(game.merlin._getHexcrawlPeriodsLength() - 1);
-      const disadvantage = weatherCode.endsWith("b");
-
-      this.navMod = speed + navigatorMod;
-
-      let tooltip = speed + " (Travel Speed) + " + navigatorMod + " (" + navigator.name + ")";
-      if(disadvantage){
-        tooltip += ", at Disadvantage (Weather)";
-      }
-      this.navModifierTooltip.textContent = tooltip;
-
-      if(!navModifier){
-        navModifier = document.getElementById("hexcrawl-navmod-info");
-      }
-      if(navModifier) navModifier.textContent = (this.navMod > 0 ? "+" : "") + this.navMod;
-    }
-
-    updateNavDC(navDC = null) {
-      if(!navDC){
-        navDC = document.getElementById("hexcrawl-navmod-info");
-      }
-      if(!navDC) return;
-      this.navDC = game.merlin.jungleTerrainNavDCs.get(this.terrainSelection);
-      navDC.textContent = "DC " + this.navDC;      
+      content.innerHTML = result;
     }
 }
 
@@ -960,9 +1098,25 @@ export function registerHexcrawlSettings(game) {
     type: Array,
     default: []
   });
+  game.settings.register("merlins-miscellany", "hexcrawlNavigationResults", {
+    name: "Hexcrawl Navigation Results",
+    hint: "Navigation results for each day.",
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {}
+  });
   game.settings.register("merlins-miscellany", "hexcrawlWeatherInterfaceVisible", {
     name: "Hexcrawl Weather Interface Visible",
     hint: "Whether the weather interface is visible.",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true
+  });
+  game.settings.register("merlins-miscellany", "hexcrawlNavigationInterfaceVisible", {
+    name: "Hexcrawl Navigation Interface Visible",
+    hint: "Whether the navigation interface is visible.",
     scope: "world",
     config: false,
     type: Boolean,
@@ -991,7 +1145,9 @@ export function registerHexcrawlSettings(game) {
   game.merlin.hexcrawlDays = game.settings.get("merlins-miscellany", "hexcrawlDays");
   game.merlin.hexcrawlTime = game.settings.get("merlins-miscellany", "hexcrawlTime");
   game.merlin.hexcrawlWeatherLog = game.settings.get("merlins-miscellany", "hexcrawlWeatherLog");
+  game.merlin.hexcrawlNavigationResults = game.settings.get("merlins-miscellany", "hexcrawlNavigationResults");
   game.merlin.hexcrawlWeatherInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlWeatherInterfaceVisible");
+  game.merlin.hexcrawlNavigationInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlNavigationInterfaceVisible");
   game.merlin.hexcrawlMainInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlMainInterfaceVisible");
   game.merlin.hexcrawlNavigatorId = game.settings.get("merlins-miscellany", "hexcrawlNavigatorId");
 }

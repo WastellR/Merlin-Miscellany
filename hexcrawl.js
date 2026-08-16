@@ -84,13 +84,13 @@ export class Hexcrawl {
       hideTooltip();
     }
 
-    function showTooltip(screenX, screenY, canvasX, canvasY) {
+    async function showTooltip(screenX, screenY, canvasX, canvasY) {
       if (!tooltip) {
         tooltip = document.createElement("div");
         tooltip.classList.add("hexcrawl-tooltip");
         document.body.appendChild(tooltip);
       }
-      const pixel = game.merlin._getPixel(canvasX, canvasY);
+      const pixel = await game.merlin._getTerrainMapPixel(canvasX, canvasY);
       const terrain = game.merlin._getTerrainStrings(pixel);
       if(terrain.title === "None") return;
 
@@ -549,7 +549,7 @@ export class Hexcrawl {
     this._updateNavigationUI();
   }
 
-  _updateNavigationUI() {
+  async _updateNavigationUI() {
     const navigationResult = this._getNavigationResult();
     const hexcrawlNavigationInterface = document.getElementById("hexcrawl-navigation-interface");
     if (!hexcrawlNavigationInterface) return;
@@ -572,7 +572,7 @@ export class Hexcrawl {
           </div>
         </div>
         <div class="hexcrawl-navigation-body">
-          ${showControls ? this._renderNavigationControls() : this._renderNavigationResults(navigationResult)}
+          ${showControls ? await this._renderNavigationControls() : this._renderNavigationResults(navigationResult)}
         </div>
       </div>
     `;
@@ -610,9 +610,9 @@ export class Hexcrawl {
     `;
   }
 
-  _renderNavigationControls() {
+  async _renderNavigationControls() {
     const terrains = this._getAvailableTerrains();
-    const terrainSelection = this._getNavigationTerrainSelection();
+    const terrainSelection = await this._getNavigationTerrainSelection();
     this.terrainSelection = terrainSelection;
     const navigatorSelected = !!game.merlin.hexcrawlNavigatorId;
     const actors = Array.from(game.actors).sort((a, b) => {
@@ -673,8 +673,11 @@ export class Hexcrawl {
     `;
   }
 
-  _getNavigationTerrainSelection() {
-    if (this.terrainSelection) return this.terrainSelection;
+  async _getNavigationTerrainSelection() {
+    if (this.terrainSelection && this.terrainSelection != ""
+      && game.merlin.lastTokenMovement == null) {
+        return this.terrainSelection;
+    }
     if (canvas.scene?.tokens?.size > 0) {
       const token = canvas.scene.tokens.contents[0];
       let centre = {};
@@ -689,7 +692,7 @@ export class Hexcrawl {
           y: token.y + (token.height * canvas.grid.sizeY / 2)
         };
       }
-      const pixel = game.merlin._getPixel(centre.x, centre.y);
+      const pixel = await game.merlin._getTerrainMapPixel(centre.x, centre.y);
       if (pixel) return pixel[2].toString(16);
     }
     const terrains = game.merlin._getAvailableTerrains?.();
@@ -964,8 +967,18 @@ export class Hexcrawl {
     this.lastTokenMovement = null;
   }
 
-  _getPixel(x, y) {
-    const image = game.merlin.hexcrawlTerrainImages.get(canvas.scene.flags.merlin.hexcrawlTerrain);
+  async _getTerrainMapPixel(x, y){
+    if (!this.hexcrawlTerrainImages.has(canvas.scene.flags.merlin.hexcrawlTerrain)) {
+      const newTerrainTexture = await this._loadTexture(canvas.scene.flags.merlin.hexcrawlTerrain);
+      if(newTerrainTexture){
+        this.hexcrawlTerrainImages.set(canvas.scene.flags.merlin.hexcrawlTerrain, newTerrainTexture.baseTexture.resource);
+      }
+    }
+    const image = this.hexcrawlTerrainImages.get(canvas.scene.flags.merlin.hexcrawlTerrain);
+    return this._getPixel(x, y, image);
+  }
+  
+  _getPixel(x, y, image) {    
     if (!image) return null;
     if (x < 0 || y < 0 || x >= image._width || y >= image._height) {
       return null;

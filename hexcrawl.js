@@ -150,6 +150,13 @@ export class Hexcrawl {
       this._updateNavigationUI();
     }
 
+    let hexcrawlEncounterInterface = this._getOrAddElement("hexcrawl-encounter-interface", "hexcrawl-left-column");
+    if (hexcrawlEncounterInterface) {
+      hexcrawlEncounterInterface.className = "hexcrawl-encounter-interface";
+      hexcrawlEncounterInterface.style.display = this.hexcrawlEncounterInterfaceVisible ? "block" : "none";
+      this._updateEncounterUI();
+    }
+
     let hexcrawlWeatherInterface = this._getOrAddElement("hexcrawl-weather-interface", "hexcrawl-left-column");
     if (hexcrawlWeatherInterface) {
       hexcrawlWeatherInterface.className = "hexcrawl-weather-interface";
@@ -219,6 +226,21 @@ export class Hexcrawl {
           game.settings.set("merlins-miscellany", "hexcrawlNavigationInterfaceVisible", this.hexcrawlNavigationInterfaceVisible);
           hexcrawlNavigationButton.classList.toggle("active", this.hexcrawlNavigationInterfaceVisible);
           this._updateNavigationUI();
+        });
+      }
+    }
+    let hexcrawlEncounterButton = this._getOrAddElement("hexcrawl-encounter-button", "hexcrawl-controls");
+    if (hexcrawlEncounterButton) {
+      hexcrawlEncounterButton.className = "hexcrawl-toggle-button icon fa-solid fa-dice-d20";
+      if (this.hexcrawlEncounterInterfaceVisible) {
+        hexcrawlEncounterButton.classList.add("active");
+      }
+      if (obj.isNew) {
+        hexcrawlEncounterButton.addEventListener("click", () => {
+          this.hexcrawlEncounterInterfaceVisible = !this.hexcrawlEncounterInterfaceVisible;
+          game.settings.set("merlins-miscellany", "hexcrawlEncounterInterfaceVisible", this.hexcrawlEncounterInterfaceVisible);
+          hexcrawlEncounterButton.classList.toggle("active", this.hexcrawlEncounterInterfaceVisible);
+          this._updateEncounterUI();
         });
       }
     }
@@ -495,6 +517,7 @@ export class Hexcrawl {
     daysCounter.innerHTML = `<div class="hexcrawl-days-counter"><span>Day ${this.hexcrawlDays}</span></div>`;
     this._crawlSetTime();
     this._updateNavigationUI();
+    this._updateEncounterUI();
   }
 
   _updateWeatherUI() {
@@ -525,6 +548,239 @@ export class Hexcrawl {
   terrainSelection = "";
   navDC = 10;
   navMod = 0;
+
+  _getEncounterDayKey(day = this.hexcrawlDays, time = this.hexcrawlTime) {
+    return `${day}:${time}`;
+  }
+
+  _getEncounterResult(day = this.hexcrawlDays, time = this.hexcrawlTime) {
+    return game.merlin.hexcrawlEncounterResults?.[this._getEncounterDayKey(day, time)] ?? null;
+  }
+
+  async _setEncounterResult(day, time, result) {
+    const results = { ...(game.merlin.hexcrawlEncounterResults ?? {}) };
+    const dayKey = this._getEncounterDayKey(day, time);
+    if (result) {
+      results[dayKey] = result;
+    } else {
+      delete results[dayKey];
+    }
+
+    game.merlin.hexcrawlEncounterResults = results;
+    //await game.settings.set("merlins-miscellany", "hexcrawlEncounterResults", results);
+    this.hexcrawlEncounterControlsVisible = false;
+    this._updateEncounterUI();
+  }
+
+  async _updateEncounterUI() {
+    const encounterResult = this._getEncounterResult();
+    const hexcrawlEncounterInterface = document.getElementById("hexcrawl-encounter-interface");
+    if (!hexcrawlEncounterInterface) return;
+
+    const showControls = !encounterResult || this.hexcrawlEncounterControlsVisible;
+    const cancelButton = encounterResult && showControls
+      ? `
+        <button type="button" class="hexcrawl-navigation-toggle hexcrawl-encounter-cancel" id="hexcrawl-encounter-cancel" aria-label="Cancel">
+          <i class="fas fa-xmark"></i>
+        </button>
+      `
+      : "";
+    const rerollButton = encounterResult && !showControls
+      ? `
+        <div class="hexcrawl-encounter-reroll-hover-detector"></div>
+        <button type="button" class="hexcrawl-navigation-toggle hexcrawl-encounter-reroll" id="hexcrawl-encounter-reroll" aria-label="Reroll">
+          <i class="fas fa-rotate-right"></i>
+        </button>
+      `
+      : "";
+
+    hexcrawlEncounterInterface.innerHTML = `
+      <div class="hexcrawl-encounter-box">
+        <div class="hexcrawl-encounter-header">
+          <div class="hexcrawl-encounter-title-row" style="display: ${showControls ? "none" : "flex"}">
+            <div class="hexcrawl-encounter-title">${encounterResult?.encounterName && encounterResult?.encounterName != "No Encounter" ? `Encounter: ${encounterResult.encounterName}` : "No Encounter"}</div>
+          </div>
+        </div>
+        ${showControls ? await this._renderEncounterControls(cancelButton) : ""}
+        ${rerollButton}
+      </div>
+    `;
+    hexcrawlEncounterInterface.style.display = this.hexcrawlEncounterInterfaceVisible ? "block" : "none";
+
+    const resultBox = hexcrawlEncounterInterface.querySelector(".hexcrawl-encounter-box");
+    if (resultBox) {
+      const hasEncounter = !showControls && encounterResult?.encounterName && encounterResult.encounterName !== "No Encounter";
+      resultBox.classList.toggle("hexcrawl-encounter-box-result", hasEncounter);
+      if (hasEncounter && !resultBox.dataset.bound) {
+        resultBox.dataset.bound = "true";
+        resultBox.tabIndex = 0;
+        resultBox.setAttribute("role", "button");
+        resultBox.setAttribute("aria-label", "Open encounter details");
+        resultBox.addEventListener("click", () => this._openEncounterPopup(encounterResult));
+        resultBox.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            this._openEncounterPopup(encounterResult);
+          }
+        });
+      }
+    }
+
+    const cancel = hexcrawlEncounterInterface.querySelector(".hexcrawl-encounter-cancel");
+    if (cancel) {
+      const cancelTooltip = game.merlin._addCustomTooltip(cancel, "Cancel Reroll");
+      cancel.addEventListener("click", () => {
+        game.merlin._hideCustomTooltip(cancelTooltip);
+        this.hexcrawlEncounterControlsVisible = !this.hexcrawlEncounterControlsVisible;
+        this._updateEncounterUI();
+      });
+    }
+
+    const reroll = hexcrawlEncounterInterface.querySelector(".hexcrawl-encounter-reroll");
+    if (reroll) {
+      const rerollTooltip = game.merlin._addCustomTooltip(reroll, "Reroll");
+      reroll.addEventListener("click", () => {
+        game.merlin._hideCustomTooltip(rerollTooltip);
+        this.hexcrawlEncounterControlsVisible = !this.hexcrawlEncounterControlsVisible;
+        this._updateEncounterUI();
+      });
+    }
+
+    if (showControls) {
+      this._bindEncounterControls(hexcrawlEncounterInterface);
+    }
+  }
+
+  async _renderEncounterControls(cancelButton = "") {
+    const terrains = this._getAvailableTerrains();
+    const terrainSelection = await this._getNavigationTerrainSelection();
+    this.terrainSelection = terrainSelection;
+
+    return `
+      <div class="hexcrawl-encounter-controls">
+        <div class="hexcrawl-encounter-column hexcrawl-encounter-column-left">
+          <div class="hexcrawl-control-group hexcrawl-terrain-selection">
+            <div class="hexcrawl-control-title">Terrain</div>
+            <select style="color: white">
+              ${[...terrains].map(([key, value]) => `
+                <option value="${key}" ${key === terrainSelection ? "selected" : ""}>
+                  ${value}
+                </option>
+              `).join("")}
+            </select>
+          </div>
+        </div>
+
+        <div class="hexcrawl-encounter-column hexcrawl-encounter-column-right">
+          <div class="hexcrawl-encounter-action-row">
+            <div class="hexcrawl-encounter-action">
+              <button type="button">Encounter</button>
+            </div>
+            ${cancelButton}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  _bindEncounterControls(container) {
+    const terrainSelect = container.querySelector(".hexcrawl-terrain-selection select");
+    if (terrainSelect) {
+      terrainSelect.addEventListener("change", (event) => {
+        this.terrainSelection = event.target.value;
+      });
+    }
+
+    const encounter = container.querySelector(".hexcrawl-encounter-action");
+    if (encounter && !encounter.dataset.bound) {
+      encounter.dataset.bound = "true";
+      encounter.addEventListener("click", async () => {
+        const terrainSelection = this.terrainSelection || (await this._getNavigationTerrainSelection());
+        const terrainName = this._getAvailableTerrains()?.get(terrainSelection) ?? terrainSelection ?? "";
+        const day = this.hexcrawlDays;
+        const time = this.hexcrawlTime;
+        const roll = await new Roll("1d20").evaluate();
+        const d20 = roll.total;
+        let encounterName = "No Encounter";
+        let encounterDescription = "";
+        let tableId = null;
+        let tableName = null;
+
+        if (d20 >= 16) {
+          const table = this._getEncounterTable(terrainSelection);
+          if (table) {
+            tableId = table.id ?? table._id ?? null;
+            tableName = table.name ?? null;
+            const draw = await table.draw({ displayChat: false });
+            console.log(draw);
+            const encounterDraw = this._getEncounterDrawInfo(draw);
+            encounterName = encounterDraw.name || tableName || "No Encounter";
+            encounterDescription = encounterDraw.description || "";
+          }
+        }
+
+        await this._setEncounterResult(day, time, {
+          d20,
+          day,
+          time,
+          terrainSelection,
+          terrainName,
+          encounterName,
+          encounterDescription,
+          tableId,
+          tableName,
+          noEncounter: encounterName === "No Encounter"
+        });
+
+        await roll.toMessage({
+          flavor: `Encounter Roll | Day ${day}, ${this._getTimeofDayString(time)}: ${encounterName}`
+        });
+      });
+    }
+  }
+
+  _getEncounterTable(terrainSelection) {    
+    const tables = game.tables?.contents ?? [];
+    return tables.find(table => {
+      const flagValue = table.flags?.merlin?.hexcrawlEncounters;
+      if (Array.isArray(flagValue)) {
+        return flagValue.map(value => `${value}`).includes(`${terrainSelection}`);
+      }
+      return `${flagValue ?? ""}` === `${terrainSelection}`;
+    }) ?? null;
+  }
+
+  _getEncounterDrawName(drawResult) {
+    if(drawResult.results.size <= 0) return "";
+    return drawResult.results[0].name;
+  }
+
+  _getEncounterDrawInfo(drawResult) {
+    const results = Array.isArray(drawResult?.results)
+      ? drawResult.results
+      : Array.from(drawResult?.results ?? []);
+    const firstResult = results[0];
+    if (!firstResult) return { name: "", description: "" };
+
+    return {
+      name: firstResult.name ?? firstResult.document?.name ?? "",
+      description: firstResult.description ?? firstResult.document?.description ?? ""
+    };
+  }
+
+  _openEncounterPopup(encounterResult) {
+    if (!encounterResult?.encounterName || encounterResult.encounterName === "No Encounter") return;
+
+    const day = encounterResult.day ?? this.hexcrawlDays;
+    const time = encounterResult.time ?? this.hexcrawlTime;
+    const title = `Day ${day}, ${this._getTimeofDayString(time)} Encounter: ${encounterResult.encounterName}`;
+    new HexcrawlEncounterPopup({
+      window: {
+        title
+      },
+      description: encounterResult.encounterDescription ?? ""
+    }).render(true);
+  }
 
   _getNavigationDayKey(day = this.hexcrawlDays) {
     return `${day}`;
@@ -1015,6 +1271,7 @@ export class Hexcrawl {
     if (this.hexcrawlDays <= 0) return;
     this.lastTokenMovement = {destination: destination, width: width, height: height};
     this._updateNavigationUI();
+    this._updateEncounterUI();
     this.lastTokenMovement = null;
   }
 
@@ -1139,6 +1396,84 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
     }
 }
 
+class HexcrawlEncounterPopup extends foundry.applications.api.ApplicationV2 {
+
+    constructor(options = {}) {
+      super(options);
+      this.encounterDescription = options.description ?? "";
+    }
+  
+    static DEFAULT_OPTIONS = {
+        id: "hexcrawl-encounter-popup",
+        classes: ["hexcrawl-popup", "hexcrawl-encounter-popup"],
+        window: {
+            title: "Encounter",
+            resizable: true
+        },
+        position: {
+            width: 500,
+            height: 320
+        }
+    };
+
+    _sanitizeEncounterHTML(html) {
+      const template = document.createElement("template");
+      template.innerHTML = String(html ?? "").replace(/\n/g, "<br>");
+
+      const allowedTags = new Set(["P", "BR", "STRONG", "B", "EM", "I", "UL", "OL", "LI", "SPAN", "DIV", "A"]);
+      const walk = (root) => {
+        for (const node of [...root.childNodes]) {
+          if (node.nodeType === Node.TEXT_NODE) continue;
+          if (node.nodeType !== Node.ELEMENT_NODE) {
+            node.remove();
+            continue;
+          }
+
+          const element = node;
+          if (!allowedTags.has(element.tagName)) {
+            const parent = element.parentNode;
+            while (element.firstChild) parent.insertBefore(element.firstChild, element);
+            element.remove();
+            continue;
+          }
+
+          for (const attr of [...element.attributes]) {
+            if (element.tagName === "A" && ["href", "title", "target", "rel"].includes(attr.name)) continue;
+            element.removeAttribute(attr.name);
+          }
+
+          if (element.tagName === "A") {
+            const href = element.getAttribute("href") ?? "";
+            if (!/^(https?:|mailto:|#)/i.test(href)) {
+              element.removeAttribute("href");
+            }
+            if (element.getAttribute("target") === "_blank") {
+              element.setAttribute("rel", "noopener noreferrer");
+            }
+          }
+
+          walk(element);
+        }
+      };
+
+      walk(template.content);
+      return template.innerHTML;
+    }
+
+    async _renderHTML(context, options) {
+      const description = this._sanitizeEncounterHTML(this.encounterDescription ?? "");
+      return `
+        <div class="hexcrawl-encounter-popup-box">
+          <div class="hexcrawl-encounter-popup-description">${description}</div>
+        </div>
+      `;
+    }
+
+    _replaceHTML(result, content, options) {
+      content.innerHTML = result;
+    }
+}
+
 export function registerHexcrawlSettings(game) {
   game.settings.register("merlins-miscellany", "showHexcrawlUI", {
     name: "Show Hexcrawl UI",
@@ -1193,6 +1528,14 @@ export function registerHexcrawlSettings(game) {
     type: Object,
     default: {}
   });
+  game.settings.register("merlins-miscellany", "hexcrawlEncounterResults", {
+    name: "Hexcrawl Encounter Results",
+    hint: "Encounter results for each day and time period.",
+    scope: "world",
+    config: false,
+    type: Object,
+    default: {}
+  });
   game.settings.register("merlins-miscellany", "hexcrawlWeatherInterfaceVisible", {
     name: "Hexcrawl Weather Interface Visible",
     hint: "Whether the weather interface is visible.",
@@ -1204,6 +1547,14 @@ export function registerHexcrawlSettings(game) {
   game.settings.register("merlins-miscellany", "hexcrawlNavigationInterfaceVisible", {
     name: "Hexcrawl Navigation Interface Visible",
     hint: "Whether the navigation interface is visible.",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true
+  });
+  game.settings.register("merlins-miscellany", "hexcrawlEncounterInterfaceVisible", {
+    name: "Hexcrawl Encounter Interface Visible",
+    hint: "Whether the encounter interface is visible.",
     scope: "world",
     config: false,
     type: Boolean,
@@ -1233,8 +1584,10 @@ export function registerHexcrawlSettings(game) {
   game.merlin.hexcrawlTime = game.settings.get("merlins-miscellany", "hexcrawlTime");
   game.merlin.hexcrawlWeatherLog = game.settings.get("merlins-miscellany", "hexcrawlWeatherLog");
   game.merlin.hexcrawlNavigationResults = game.settings.get("merlins-miscellany", "hexcrawlNavigationResults");
+  game.merlin.hexcrawlEncounterResults = game.settings.get("merlins-miscellany", "hexcrawlEncounterResults");
   game.merlin.hexcrawlWeatherInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlWeatherInterfaceVisible");
   game.merlin.hexcrawlNavigationInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlNavigationInterfaceVisible");
+  game.merlin.hexcrawlEncounterInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlEncounterInterfaceVisible");
   game.merlin.hexcrawlMainInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlMainInterfaceVisible");
   game.merlin.hexcrawlNavigatorId = game.settings.get("merlins-miscellany", "hexcrawlNavigatorId");
 }

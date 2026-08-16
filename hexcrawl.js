@@ -555,33 +555,58 @@ export class Hexcrawl {
     if (!hexcrawlNavigationInterface) return;
 
     const showControls = !navigationResult || this.hexcrawlNavigationControlsVisible;
-    const toggleButton = navigationResult
+    const cancelButton = navigationResult && showControls
       ? `
-        <button type="button" class="hexcrawl-navigation-toggle" aria-label="${showControls ? "Cancel" : "Reroll"}">
-          <i class="fas fa-${showControls ? "xmark" : "rotate-right"}"></i>
+        <button type="button" class="hexcrawl-navigation-toggle hexcrawl-navigation-cancel" id="hexcrawl-navigation-cancel" aria-label="Cancel">
+          <i class="fas fa-xmark"></i>
         </button>
       `
       : "";
-
+    const rerollButton = navigationResult && !showControls
+      ? `
+        <div class="hexcrawl-navigation-reroll-hover-detector"></div>
+        <button type="button" class="hexcrawl-navigation-toggle hexcrawl-navigation-reroll" id="hexcrawl-navigation-reroll" aria-label="Reroll">
+          <i class="fas fa-rotate-right"></i>
+        </button>
+      `
+      : "";
+    let bIsLost = false;
+    if(!showControls && navigationResult){
+      bIsLost = navigationResult.lost;
+    }
     hexcrawlNavigationInterface.innerHTML = `
       <div class="hexcrawl-navigation-box">
-        <div class="hexcrawl-navigation-header">
-          <div class="hexcrawl-navigation-title-row">
-            <div class="hexcrawl-navigation-title">Navigation</div>
-            ${toggleButton}
+        <div class="hexcrawl-navigation-header">          
+          <div class="hexcrawl-navigation-title-row" style="display: ${showControls ? "none" : "flex"}">
+            <div class="${bIsLost ? "hexcrawl-navigation-title-lost" : "hexcrawl-navigation-title"}">${bIsLost ? "Lost!" : "Navigation Success!"}</div>
+          </div>
+          <div class="hexcrawl-navigation-actions">
+            ${cancelButton}
           </div>
         </div>
         <div class="hexcrawl-navigation-body">
           ${showControls ? await this._renderNavigationControls() : this._renderNavigationResults(navigationResult)}
         </div>
+        ${rerollButton}
       </div>
     `;
     hexcrawlNavigationInterface.style.display = this.hexcrawlNavigationInterfaceVisible ? "block" : "none";
 
-    const toggle = hexcrawlNavigationInterface.querySelector(".hexcrawl-navigation-toggle");
-    if (toggle) {
-      game.merlin._addCustomTooltip(toggle, showControls ? "cancel" : "reroll");
-      toggle.addEventListener("click", () => {
+    const cancel = hexcrawlNavigationInterface.querySelector(".hexcrawl-navigation-cancel");
+    if (cancel) {
+      const cancelTooltip = game.merlin._addCustomTooltip(cancel, "Cancel Reroll");
+      cancel.addEventListener("click", () => {
+        game.merlin._hideCustomTooltip(cancelTooltip);
+        this.hexcrawlNavigationControlsVisible = !this.hexcrawlNavigationControlsVisible;
+        this._updateNavigationUI();
+      });
+    }
+
+    const reroll = hexcrawlNavigationInterface.querySelector(".hexcrawl-navigation-reroll");
+    if (reroll) {
+      const rerollTooltip = game.merlin._addCustomTooltip(reroll, "Reroll");
+      reroll.addEventListener("click", () => {
+        game.merlin._hideCustomTooltip(rerollTooltip);
         this.hexcrawlNavigationControlsVisible = !this.hexcrawlNavigationControlsVisible;
         this._updateNavigationUI();
       });
@@ -601,13 +626,15 @@ export class Hexcrawl {
       ? `+${navigationResult.perceptionModifier}`
       : `${navigationResult.perceptionModifier}`;
 
-    return `
-      <ul class="hexcrawl-navigation-list">
-        <li><span class="hexcrawl-navigation-label">Lost:</span> ${lost}</li>
-        <li><span class="hexcrawl-navigation-label">Movement distance:</span> ${movementDistance}</li>
-        <li><span class="hexcrawl-navigation-label">Perception modifier:</span> ${perceptionModifier}</li>
-      </ul>
-    `;
+    let results = `<ul class="hexcrawl-navigation-list">`;
+    if(movementDistance != 0){
+      results += `<li><span class='hexcrawl-navigation-label'>Movement:</span> ${movementDistance}</li>`
+    }
+    if(perceptionModifier != 0){
+      results += `<li><span class='hexcrawl-navigation-label'>Perception:</span> ${perceptionModifier}</li>`
+    }
+    results += `</ul>`;
+    return results;
   }
 
   async _renderNavigationControls() {
@@ -626,49 +653,56 @@ export class Hexcrawl {
 
     return `
       <div class="hexcrawl-navigation-controls">
-        <div class="hexcrawl-terrain-selection">
-          <select>
-            ${[...terrains].map(([key, value]) => `
-              <option value="${key}" ${key === terrainSelection ? "selected" : ""}>
-                ${value}
-              </option>
-            `).join("")}
-          </select>
+        <div class="hexcrawl-navigation-column hexcrawl-navigation-column-left">
+          <div class="hexcrawl-control-group hexcrawl-speed-selection">
+            <div class="hexcrawl-control-title">Travel Speed</div>
+            <label class="hexcrawl-speed-option" id="hexcrawl-slow-speed">
+              <input type="radio" name="speed" value="slow" ${this.speedSelection === 0 ? "checked" : ""}>
+              Slow
+            </label>
+            <label class="hexcrawl-speed-option" id="hexcrawl-normal-speed">
+              <input type="radio" name="speed" value="normal" ${this.speedSelection === 1 ? "checked" : ""}>
+              Normal
+            </label>
+            <label class="hexcrawl-speed-option" id="hexcrawl-fast-speed">
+              <input type="radio" name="speed" value="fast" ${this.speedSelection === 2 ? "checked" : ""}>
+              Fast
+            </label>
+          </div>
+
+          <div class="hexcrawl-control-group hexcrawl-character-selection">
+            <div class="hexcrawl-control-title">Navigator</div>
+            <select style="color: white">
+              <option value="" disabled ${navigatorSelected ? "" : "selected"}>Select Navigator</option>
+              ${actors.map(actor => `
+                <option value="${actor.id}" ${actor.id === game.merlin.hexcrawlNavigatorId ? "selected" : ""}>
+                  ${actor.name}
+                </option>
+              `).join("")}
+            </select>
+          </div>
+
+          <div class="hexcrawl-control-group hexcrawl-terrain-selection">
+            <div class="hexcrawl-control-title">Terrain</div>
+            <select style="color: white">
+              ${[...terrains].map(([key, value]) => `
+                <option value="${key}" ${key === terrainSelection ? "selected" : ""}>
+                  ${value}
+                </option>
+              `).join("")}
+            </select>
+          </div>
         </div>
 
-        <div class="hexcrawl-speed-selection">
-          <label>
-            <input type="radio" name="speed" value="slow" ${this.speedSelection === 0 ? "checked" : ""}>
-            Slow
-          </label>
-          <label>
-            <input type="radio" name="speed" value="normal" ${this.speedSelection === 1 ? "checked" : ""}>
-            Normal
-          </label>
-          <label>
-            <input type="radio" name="speed" value="fast" ${this.speedSelection === 2 ? "checked" : ""}>
-            Fast
-          </label>
+        <div class="hexcrawl-navigation-column hexcrawl-navigation-column-right">
+          <div class="hexcrawl-navmod-info" id="hexcrawl-navmod-info"></div>
+
+          <div class="hexcrawl-navigation-action">
+            <button type="button">Navigate</button>
+          </div>
+
+          <div class="hexcrawl-navdc-info" id="hexcrawl-navdc-info"></div>
         </div>
-
-        <div class="hexcrawl-character-selection">
-          <select>
-            <option value="" disabled ${navigatorSelected ? "" : "selected"}>Select Navigator</option>
-            ${actors.map(actor => `
-              <option value="${actor.id}" ${actor.id === game.merlin.hexcrawlNavigatorId ? "selected" : ""}>
-                ${actor.name}
-              </option>
-            `).join("")}
-          </select>
-        </div>
-
-        <div class="hexcrawl-navmod-info" id="hexcrawl-navmod-info"></div>
-
-        <div class="hexcrawl-navigation-action">
-          <button type="button">Navigate</button>
-        </div>
-
-        <div class="hexcrawl-navdc-info" id="hexcrawl-navdc-info"></div>
       </div>
     `;
   }
@@ -722,6 +756,21 @@ export class Hexcrawl {
       });
     });
 
+    const speedTooltipMap = {
+      slow: "At a slow pace, characters have a 50% chance to move one hex fewer than usual. They also gain a +5 bonus to navigation checks, and to passive Wisdom (Perception) scores.",
+      normal: "At a normal pace, characters can move 1 hex on foot, and 2 hexes by canoe.",
+      fast: "At a fast pace, characters get a 50% chance to move one bonus hex. They also suffer a -5 penalty to navigation checks, and to passive Wisdom (Perception) scores."
+    };
+    container.querySelectorAll('input[name="speed"]').forEach(radio => {
+      const label = radio.closest("label");
+      if (!label) return;
+      const tooltipText = speedTooltipMap[radio.value];
+      if (tooltipText) {
+        game.merlin._addCustomTooltip(label, tooltipText, 2000, "rgba(0, 0, 0, 0.9)");
+        label.classList.add("hexcrawl-speed-tooltip-target");
+      }
+    });
+
     const select = container.querySelector(".hexcrawl-character-selection select");
     if (select) {
       select.addEventListener("change", (event) => {
@@ -734,7 +783,7 @@ export class Hexcrawl {
 
     const modifierInfo = container.querySelector(".hexcrawl-navmod-info");
     if (modifierInfo) {
-      this.navModifierTooltip = game.merlin._addCustomTooltip(modifierInfo, "");
+      this.navModifierTooltip = game.merlin._addCustomTooltip(modifierInfo, "", 500, "rgba(0, 0, 0, 0.9)");
       this.updateNavModifier(modifierInfo);
     }
 
@@ -796,7 +845,9 @@ export class Hexcrawl {
       navModifier = document.getElementById("hexcrawl-navmod-info");
     }
     if(navModifier) {
-      navModifier.textContent = (this.navMod > 0 ? "+" : "") + this.navMod;
+      navModifier.textContent = this.navMod === 0
+        ? "No Bonus"
+        : (this.navMod > 0 ? "+" : "") + this.navMod;
       if (this.navModifierTooltip) {
         this.navModifierTooltip.textContent = tooltip;
       }
@@ -992,21 +1043,36 @@ export class Hexcrawl {
     return ctx.getImageData(0, 0, 1, 1).data;
   }
 
-  _addCustomTooltip(element, text) {
-    const tooltip = document.createElement("div");
+  customTooltips = new Map();
+  _addCustomTooltip(element, text, delay = 500, background = "") {
+    // Give all elements at least a random id
+    if(element.id === ""){
+      console.warn("Element has no id, cannot be used with this function.");
+      return;
+    }
+    let tooltip = null;
+    if(this.customTooltips.has(element.id)){
+      tooltip = this.customTooltips.get(element.id);      
+    }
+    else{
+      tooltip = document.createElement("div");
+      this.customTooltips.set(element.id, tooltip);
+    }    
     tooltip.classList.add("hexcrawl-tooltip");
     tooltip.textContent = text;
     document.body.appendChild(tooltip);
 
-    let timer = null;
+    tooltip._hexcrawlTimer = null;
 
     element.addEventListener("mouseenter", (event) => {
-        timer = setTimeout(() => {
+        clearTimeout(tooltip._hexcrawlTimer);
+        tooltip._hexcrawlTimer = setTimeout(() => {
             tooltip.style.left = `${event.clientX + 12}px`;
             tooltip.style.top = `${event.clientY + 12}px`;
             tooltip.style.opacity = "1";
             tooltip.style.display = "block";
-        }, 500);
+            if(background != "") tooltip.style.background = background;
+        }, delay);
     });
 
     element.addEventListener("mousemove", (event) => {
@@ -1015,11 +1081,19 @@ export class Hexcrawl {
     });
 
     element.addEventListener("mouseleave", () => {
-        clearTimeout(timer);
+        clearTimeout(tooltip._hexcrawlTimer);
         tooltip.style.opacity = "0";
+        tooltip.style.display = "none";
     });
 
     return tooltip;
+  }
+
+  _hideCustomTooltip(tooltip) {
+    if (!tooltip) return;
+    clearTimeout(tooltip._hexcrawlTimer);
+    tooltip.style.display = "none";
+    tooltip.style.opacity = "0";
   }
 
 }

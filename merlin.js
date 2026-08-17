@@ -811,7 +811,7 @@ class Merlin extends Hexcrawl{
   async _getSceneControlButtons(controls){
     console.log("Merlin | Adding scene control buttons", controls);
     let bContainsPoiButton = false;
-    for (const tile of canvas.scene.tiles) {
+    for (const tile of canvas?.scene?.tiles) {
       if (tile?.flags?.merlin?.isPOI === true) {
           bContainsPoiButton = true;
           break;

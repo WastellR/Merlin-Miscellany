@@ -1397,7 +1397,7 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
         },
         position: {
             width: 400,
-            height: 300
+            height: 400
         }
     };
 
@@ -1412,34 +1412,36 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
 
     async _renderHTML(context, options) {
         return `
-          <div class="hexcrawl-popup-partySelect">
-            <div class="hexcrawl-popup-label">Party Token</div>
-            <select style="color: white">
-              ${canvas.scene.tokens.map(token => `
-                  <option value="${token.id}" ${token.id === game.merlin._getPartyTokenId() ? "selected" : ""}>
-                      ${game.actors.get(token.actorId)?.name}
-                  </option>
-              `).join("")}
-            </select>
+          <div class="hexcrawl-popup-body">
+            <section class="hexcrawl-popup-section hexcrawl-popup-partySelect">
+              <div class="hexcrawl-popup-section-title">Party Token</div>
+              <select class="hexcrawl-popup-select">
+                ${canvas.scene.tokens.map(token => `
+                    <option value="${token.id}" ${token.id === game.merlin._getPartyTokenId() ? "selected" : ""}>
+                        ${game.actors.get(token.actorId)?.name}
+                    </option>
+                `).join("")}
+              </select>
+            </section>
+            <section class="hexcrawl-popup-section hexcrawl-popup-rerolls">
+              <label class="hexcrawl-popup-checkbox">
+                <input type="checkbox" name="hexcrawl-allow-rerolls" ${game.merlin.hexcrawlAllowRerolls ? "checked" : ""}>
+                <span>Allow Rerolls</span>
+              </label>
+            </section>
+            <section class="hexcrawl-popup-section hexcrawl-popup-actions">
+              <button type="button" class="hexcrawl-popup-button hexcrawl-popup-button-secondary" name="hexcrawl-restart-adventure">Restart Adventure</button>
+            </section>
+            ${this.showRestartConfirm ? `
+              <section class="hexcrawl-popup-section hexcrawl-popup-confirm">
+                <div class="hexcrawl-popup-confirm-text">Really clear all logs and restart adventure?</div>
+                <div class="hexcrawl-popup-confirm-actions">
+                  <button type="button" class="hexcrawl-popup-button hexcrawl-popup-button-danger" name="hexcrawl-restart-confirm">Restart</button>
+                  <button type="button" class="hexcrawl-popup-button hexcrawl-popup-button-secondary" name="hexcrawl-restart-cancel">Cancel</button>
+                </div>
+              </section>
+            ` : ""}
           </div>
-          <div class="hexcrawl-popup-rerolls">
-            <label class="hexcrawl-popup-label" style="display: flex; gap: 0.5em; align-items: center;">
-              <input type="checkbox" name="hexcrawl-allow-rerolls" ${game.merlin.hexcrawlAllowRerolls ? "checked" : ""}>
-              Allow Rerolls
-            </label>
-          </div>
-          <div class="hexcrawl-popup-restart">
-            <button type="button" name="hexcrawl-restart-adventure">Restart Adventure</button>
-          </div>
-          ${this.showRestartConfirm ? `
-            <div class="hexcrawl-popup-restart-confirm">
-              <div class="hexcrawl-popup-label">Really clear all logs and restart adventure?</div>
-              <div style="display: flex; gap: 0.5em; flex-wrap: wrap;">
-                <button type="button" name="hexcrawl-restart-confirm">Restart</button>
-                <button type="button" name="hexcrawl-restart-cancel">Cancel</button>
-              </div>
-            </div>
-          ` : ""}
         `;
     }
 

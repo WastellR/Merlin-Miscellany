@@ -1081,6 +1081,10 @@ export class Hexcrawl {
         } else if (movementDistance > 0) {
           flavor += " +1 Movement";
         }
+        const partyToken = canvas.scene.tokens.get(this._getPartyTokenId());
+        if(partyToken) {
+          partyToken.update({"hidden": !success});
+        }
         await game.merlin._setNavigationResult(Day, {
           lost: !success,
           movementDistance,

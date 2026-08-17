@@ -588,7 +588,7 @@ export class Hexcrawl {
         </button>
       `
       : "";
-    const rerollButton = encounterResult && !showControls
+    const rerollButton = encounterResult && !showControls && this.hexcrawlAllowRerolls
       ? `
         <div class="hexcrawl-encounter-reroll-hover-detector"></div>
         <button type="button" class="hexcrawl-navigation-toggle hexcrawl-encounter-reroll" id="hexcrawl-encounter-reroll" aria-label="Reroll">
@@ -824,7 +824,7 @@ export class Hexcrawl {
         </button>
       `
       : "";
-    const rerollButton = navigationResult && !showControls
+    const rerollButton = navigationResult && !showControls && this.hexcrawlAllowRerolls
       ? `
         <div class="hexcrawl-navigation-reroll-hover-detector"></div>
         <button type="button" class="hexcrawl-navigation-toggle hexcrawl-navigation-reroll" id="hexcrawl-navigation-reroll" aria-label="Reroll">
@@ -1416,6 +1416,12 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
               `).join("")}
             </select>
           </div>
+          <div class="hexcrawl-popup-rerolls">
+            <label class="hexcrawl-popup-label" style="display: flex; gap: 0.5em; align-items: center;">
+              <input type="checkbox" name="hexcrawl-allow-rerolls" ${game.merlin.hexcrawlAllowRerolls ? "checked" : ""}>
+              Allow Rerolls
+            </label>
+          </div>
         `;
     }
 
@@ -1428,6 +1434,16 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
           game.merlin.hexcrawlPartyTokenId = event.target.value;
           game.settings.set("merlins-miscellany", "hexcrawlPartyTokenId", game.merlin.hexcrawlPartyTokenId);
           game.merlin.terrainSelection = "";
+          game.merlin._updateNavigationUI();
+          game.merlin._updateEncounterUI();
+        });
+      }
+
+      const rerollsCheckbox = content.querySelector('input[name="hexcrawl-allow-rerolls"]');
+      if (rerollsCheckbox) {
+        rerollsCheckbox.addEventListener("change", (event) => {
+          game.merlin.hexcrawlAllowRerolls = event.target.checked;
+          game.settings.set("merlins-miscellany", "hexcrawlAllowRerolls", game.merlin.hexcrawlAllowRerolls);
           game.merlin._updateNavigationUI();
           game.merlin._updateEncounterUI();
         });
@@ -1607,6 +1623,14 @@ export function registerHexcrawlSettings(game) {
     type: Boolean,
     default: true
   });
+  game.settings.register("merlins-miscellany", "hexcrawlAllowRerolls", {
+    name: "Allow Rerolls",
+    hint: "Whether the reroll buttons stay hidden on the encounter and navigation panels.",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false
+  });
   game.settings.register("merlins-miscellany", "hexcrawlNavigatorId", {
     name: "Hexcrawl Navigator ID",
     hint: "ID of character currently selected as navigator",
@@ -1636,6 +1660,7 @@ export function registerHexcrawlSettings(game) {
   game.merlin.hexcrawlNavigationInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlNavigationInterfaceVisible");
   game.merlin.hexcrawlEncounterInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlEncounterInterfaceVisible");
   game.merlin.hexcrawlMainInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlMainInterfaceVisible");
+  game.merlin.hexcrawlAllowRerolls = game.settings.get("merlins-miscellany", "hexcrawlAllowRerolls");
   game.merlin.hexcrawlNavigatorId = game.settings.get("merlins-miscellany", "hexcrawlNavigatorId");
   game.merlin.hexcrawlPartyTokenId = game.settings.get("merlins-miscellany", "hexcrawlPartyTokenId");
 }

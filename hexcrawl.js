@@ -598,7 +598,7 @@ export class Hexcrawl {
       <div class="hexcrawl-encounter-box">
         <div class="hexcrawl-encounter-header">
           <div class="hexcrawl-encounter-title-row" style="display: ${showControls ? "none" : "flex"}">
-            <div class="hexcrawl-encounter-title">${encounterResult?.encounterName && encounterResult?.encounterName != "No Encounter" ? `Encounter: ${encounterResult.encounterName}` : "No Encounter"}</div>
+            <div class="hexcrawl-encounter-title">${encounterResult?.encounterName && encounterResult?.encounterName != "No Encounter" && encounterResult?.encounterName != "Encounter!" ? `Encounter: ${encounterResult.encounterName}` : encounterResult?.encounterName}</div>
           </div>
         </div>
         ${showControls ? await this._renderEncounterControls(cancelButton) : ""}
@@ -609,7 +609,8 @@ export class Hexcrawl {
 
     const resultBox = hexcrawlEncounterInterface.querySelector(".hexcrawl-encounter-box");
     if (resultBox) {
-      const hasEncounter = !showControls && encounterResult?.encounterName && encounterResult.encounterName !== "No Encounter";
+      const hasEncounter = !showControls && encounterResult?.encounterName && encounterResult.encounterName !== "No Encounter"
+        && encounterResult?.encounterName != "Encounter!";
       resultBox.classList.toggle("hexcrawl-encounter-box-result", hasEncounter);
       if (hasEncounter && !resultBox.dataset.bound) {
         resultBox.dataset.bound = "true";
@@ -709,13 +710,16 @@ export class Hexcrawl {
         if (d20 >= 16) {
           const table = this._getEncounterTable(terrainSelection);
           if (table) {
-            tableId = table.id ?? table._id ?? null;
+            tableId = table.id ?? null;
             tableName = table.name ?? null;
             const draw = await table.draw({ displayChat: false });
             console.log(draw);
             const encounterDraw = this._getEncounterDrawInfo(draw);
             encounterName = encounterDraw.name || tableName || "No Encounter";
             encounterDescription = encounterDraw.description || "";
+          }
+          else{
+            encounterName = "Encounter!"
           }
         }
 
@@ -733,7 +737,7 @@ export class Hexcrawl {
         });
 
         await roll.toMessage({
-          flavor: `Encounter Roll | Day ${day}, ${this._getTimeofDayString(time)}: ${encounterName}`
+          flavor: `Encounter Roll | Day ${day}, ${this._getTimeofDayString(time)}: ${encounterName} ${encounterName != "No Encounter" && !tableId ? " (No Rollable Table)" : ""}`
         });
       });
     }

@@ -1030,7 +1030,7 @@ class Merlin extends Hexcrawl{
           toggle = this.usersUseMerlinVideo[game.userId];
           console.log("Merlin | " + "Switching to " + (toggle ? "animated" : "static") + " backgrounds.");
 
-          let desiredBackgroundInfo = this.currentBackgroundInfo;
+          let desiredBackgroundInfo = {...this.currentBackgroundInfo};
           desiredBackgroundInfo.isVideo = toggle;
           this._updateBackground(desiredBackgroundInfo);
         },
@@ -1047,15 +1047,10 @@ class Merlin extends Hexcrawl{
         toggle: game.version < 14,
         active: this.currentBackgroundInfo.time === "night" ?? false,
         onChange: (toggle) => {
-          let desiredBackgroundInfo = this.currentBackgroundInfo;
+          let desiredBackgroundInfo = {...this.currentBackgroundInfo};
           desiredBackgroundInfo.time = this.currentBackgroundInfo.time === "day" ? "night" : "day";
           console.log("Merlin | " + "Switching time to " + desiredBackgroundInfo.time);
-          if(this._updateBackground(desiredBackgroundInfo)){
-            this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;
-            if(this.globalMerlinWeatherEnabled){
-              this.globalMerlinTime = desiredBackgroundInfo.time;
-            }
-          }
+          this._updateBackground(desiredBackgroundInfo);
         }
       };
       controls.lighting.tools[timeSelect.name] = timeSelect;
@@ -1073,15 +1068,10 @@ class Merlin extends Hexcrawl{
         toggle: true, 
         active: this.currentBackgroundInfo.weather === "rain" ?? false,
         onChange: (toggle) => {
-          let desiredBackgroundInfo = this.currentBackgroundInfo;
+          let desiredBackgroundInfo = {...this.currentBackgroundInfo};
           desiredBackgroundInfo.weather = this.currentBackgroundInfo.weather === "rain" ? "none" : "rain";
           console.log("Merlin | " + "Switching weather to " + desiredBackgroundInfo.weather);
-          if(this._updateBackground(desiredBackgroundInfo)){
-            this.sceneMerlinWeather[canvas.scene.id] = desiredBackgroundInfo.weather;
-            if(this.globalMerlinWeatherEnabled){
-              this.globalMerlinWeather = desiredBackgroundInfo.weather;
-            }
-          }
+          this._updateBackground(desiredBackgroundInfo);
         }
       };
       controls.lighting.tools[weatherSelect.name] = weatherSelect;
@@ -1278,6 +1268,7 @@ class Merlin extends Hexcrawl{
   }
 
   async _updateBackground(backgroundInfo){
+    if(JSON.stringify(backgroundInfo) === JSON.stringify(this.currentBackgroundInfo)) return false;
     const targetKey = this._getKeyFromBackgroundInfo(backgroundInfo);
     if(this.sceneBackgroundFilenames[targetKey]){      
       let object = { background: { src: this.sceneBackgroundFilenames[targetKey] } };
@@ -1295,6 +1286,13 @@ class Merlin extends Hexcrawl{
       }
 
       this.currentBackgroundInfo = backgroundInfo;
+      this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
+      this.sceneMerlinWeather[canvas.scene.id] = backgroundInfo.weather;
+      if(this.globalMerlinWeatherEnabled){
+        this.globalMerlinTime = backgroundInfo.time;
+        this.globalMerlinWeather = backgroundInfo.weather;
+      }
+
       return true;
     }
     return false;

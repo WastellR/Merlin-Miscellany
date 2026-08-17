@@ -362,6 +362,7 @@ export class Hexcrawl {
     // Update UI for current time
     this._updateDaysUI();
     this._updateWeatherUI();
+    this._crawlUpdateBackground();
   }
 
   _crawlPrevDay() {
@@ -373,6 +374,7 @@ export class Hexcrawl {
     this.hexcrawlNavigationControlsVisible = false;
     this._updateDaysUI();
     this._updateWeatherUI();
+    this._crawlUpdateBackground();
   }
 
   async _crawlNextPeriod() {
@@ -388,6 +390,7 @@ export class Hexcrawl {
       this._updateDaysUI();
       this._updateWeatherUI();
     }
+    this._crawlUpdateBackground();
   }
 
   _crawlPrevPeriod() {
@@ -402,6 +405,22 @@ export class Hexcrawl {
     game.settings.set("merlins-miscellany", "hexcrawlTime", this.hexcrawlTime);
     this._updateDaysUI();
     this._updateWeatherUI();
+    this._crawlUpdateBackground();
+  }
+
+  _crawlUpdateBackground() {
+    if(!this.hexcrawlAutoUpdateBG) return;
+    let desiredBackgroundInfo = {...this.currentBackgroundInfo};
+    desiredBackgroundInfo.time = this.hexcrawlTime === 2 ? "night" : "day";
+    const weatherCode = this.hexcrawlWeatherLog.at(this._getHexcrawlPeriodsLength() - 1);
+    const [temperature, wind, precipitation, special] = weatherCode.split("");
+    desiredBackgroundInfo.weather = precipitation === "a" ? "none" : "rain";
+    if(this._updateBackground(desiredBackgroundInfo)){
+      this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;
+      if(this.globalMerlinWeatherEnabled){
+        this.globalMerlinTime = desiredBackgroundInfo.time;
+      }
+    }
   }
 
   _getHexcrawlPeriodsLength() {
@@ -1432,6 +1451,10 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
                 <input type="checkbox" name="hexcrawl-allow-rerolls" ${game.merlin.hexcrawlAllowRerolls ? "checked" : ""}>
                 <span>Allow Rerolls</span>
               </label>
+              <label class="hexcrawl-popup-checkbox">
+                <input type="checkbox" name="hexcrawl-update-bgs" ${game.merlin.hexcrawlAutoUpdateBG ? "checked" : ""}>
+                <span>Auto-Update Backgrounds</span>
+              </label>
             </section>
             <section class="hexcrawl-popup-section hexcrawl-popup-actions">
               <button type="button" class="hexcrawl-popup-button hexcrawl-popup-button-secondary" name="hexcrawl-restart-adventure">Restart Adventure</button>
@@ -1470,6 +1493,15 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
           game.settings.set("merlins-miscellany", "hexcrawlAllowRerolls", game.merlin.hexcrawlAllowRerolls);
           game.merlin._updateNavigationUI();
           game.merlin._updateEncounterUI();
+        });
+      }
+
+      const autoUpdateCheckbox = content.querySelector('input[name="hexcrawl-update-bgs"]');
+      if (autoUpdateCheckbox) {
+        autoUpdateCheckbox.addEventListener("change", (event) => {
+          game.merlin.hexcrawlAutoUpdateBG = event.target.checked;
+          game.settings.set("merlins-miscellany", "hexcrawlAutoUpdateBG", game.merlin.hexcrawlAutoUpdateBG);
+          
         });
       }
 
@@ -1695,6 +1727,14 @@ export function registerHexcrawlSettings(game) {
     type: Boolean,
     default: false
   });
+  game.settings.register("merlins-miscellany", "hexcrawlAutoUpdateBG", {
+    name: "Auto-update Background",
+    hint: "Whether to automatically update the background when the weather/time changes.",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: true
+  });
   game.settings.register("merlins-miscellany", "hexcrawlNavigatorId", {
     name: "Hexcrawl Navigator ID",
     hint: "ID of character currently selected as navigator",
@@ -1725,6 +1765,7 @@ export function registerHexcrawlSettings(game) {
   game.merlin.hexcrawlEncounterInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlEncounterInterfaceVisible");
   game.merlin.hexcrawlMainInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlMainInterfaceVisible");
   game.merlin.hexcrawlAllowRerolls = game.settings.get("merlins-miscellany", "hexcrawlAllowRerolls");
+  game.merlin.hexcrawlAutoUpdateBG = game.settings.get("merlins-miscellany", "hexcrawlAutoUpdateBG");
   game.merlin.hexcrawlNavigatorId = game.settings.get("merlins-miscellany", "hexcrawlNavigatorId");
   game.merlin.hexcrawlPartyTokenId = game.settings.get("merlins-miscellany", "hexcrawlPartyTokenId");
 }

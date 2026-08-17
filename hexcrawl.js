@@ -142,19 +142,19 @@ export class Hexcrawl {
       hexcrawlLeftColumn.style.display = this.hexcrawlDays > 0 && show ? "flex" : "none";
     }
 
-    // Navigation interface
-    let hexcrawlNavigationInterface = this._getOrAddElement("hexcrawl-navigation-interface", "hexcrawl-left-column");
-    if (hexcrawlNavigationInterface) {
-      hexcrawlNavigationInterface.className = "hexcrawl-navigation-interface";
-      hexcrawlNavigationInterface.style.display = this.hexcrawlNavigationInterfaceVisible ? "block" : "none";
-      this._updateNavigationUI();
-    }
-
+    // Hexcrawl interfaces
     let hexcrawlEncounterInterface = this._getOrAddElement("hexcrawl-encounter-interface", "hexcrawl-left-column");
     if (hexcrawlEncounterInterface) {
       hexcrawlEncounterInterface.className = "hexcrawl-encounter-interface";
       hexcrawlEncounterInterface.style.display = this.hexcrawlEncounterInterfaceVisible ? "block" : "none";
       this._updateEncounterUI();
+    }
+
+    let hexcrawlNavigationInterface = this._getOrAddElement("hexcrawl-navigation-interface", "hexcrawl-left-column");
+    if (hexcrawlNavigationInterface) {
+      hexcrawlNavigationInterface.className = "hexcrawl-navigation-interface";
+      hexcrawlNavigationInterface.style.display = this.hexcrawlNavigationInterfaceVisible ? "block" : "none";
+      this._updateNavigationUI();
     }
 
     let hexcrawlWeatherInterface = this._getOrAddElement("hexcrawl-weather-interface", "hexcrawl-left-column");
@@ -168,34 +168,7 @@ export class Hexcrawl {
     let hexcrawlControls = this._getOrAddElement("hexcrawl-controls", "hexcrawl-left-column");
     if (hexcrawlControls) {
       hexcrawlControls.className = "hexcrawl-controls";
-    }
-    let hexcrawlControlPanelButton = this._getOrAddElement("hexcrawl-control-panel-button", "hexcrawl-controls");
-    if (hexcrawlControlPanelButton) {
-      hexcrawlControlPanelButton.className = "hexcrawl-toggle-button icon fa-solid fa-hexagon";
-      if (!this.hexcrawlPopup) {
-        this.hexcrawlPopup = new HexcrawlPopup();
-      }
-      if (this.hexcrawlMainInterfaceVisible) {
-        hexcrawlControlPanelButton.classList.add("active");
-        this.hexcrawlPopup.render(this.hexcrawlDays > 0);
-      }
-      if (obj.isNew) {
-        hexcrawlControlPanelButton.addEventListener("click", () => {
-          if(this.hexcrawlPopup){
-            if(this.hexcrawlMainInterfaceVisible){
-              this.hexcrawlPopup.close();
-              return;
-            }
-            else{
-              this.hexcrawlPopup.render(true);
-            }
-          }
-          hexcrawlControlPanelButton.classList.toggle("active");
-          this.hexcrawlMainInterfaceVisible = true;
-          game.settings.set("merlins-miscellany", "hexcrawlMainInterfaceVisible", this.hexcrawlMainInterfaceVisible);
-        });
-      }
-    }
+    }    
     let hexcrawlWeatherButton = this._getOrAddElement("hexcrawl-weather-button", "hexcrawl-controls");
     if (hexcrawlWeatherButton) {
       hexcrawlWeatherButton.className = "hexcrawl-toggle-button icon fa-solid fa-cloud";
@@ -244,9 +217,32 @@ export class Hexcrawl {
         });
       }
     }
-    let hexcrawlLogButton = this._getOrAddElement("hexcrawl-log-button", "hexcrawl-controls");
-    if (hexcrawlLogButton) {
-      hexcrawlLogButton.className = "hexcrawl-toggle-button icon fa-solid fa-table-list";
+    let hexcrawlControlPanelButton = this._getOrAddElement("hexcrawl-control-panel-button", "hexcrawl-controls");
+    if (hexcrawlControlPanelButton) {
+      hexcrawlControlPanelButton.className = "hexcrawl-toggle-button icon fa-solid fa-hexagon";
+      if (!this.hexcrawlPopup) {
+        this.hexcrawlPopup = new HexcrawlPopup();
+      }
+      if (this.hexcrawlMainInterfaceVisible) {
+        hexcrawlControlPanelButton.classList.add("active");
+        this.hexcrawlPopup.render(this.hexcrawlDays > 0);
+      }
+      if (obj.isNew) {
+        hexcrawlControlPanelButton.addEventListener("click", () => {
+          if(this.hexcrawlPopup){
+            if(this.hexcrawlMainInterfaceVisible){
+              this.hexcrawlPopup.close();
+              return;
+            }
+            else{
+              this.hexcrawlPopup.render(true);
+            }
+          }
+          hexcrawlControlPanelButton.classList.toggle("active");
+          this.hexcrawlMainInterfaceVisible = true;
+          game.settings.set("merlins-miscellany", "hexcrawlMainInterfaceVisible", this.hexcrawlMainInterfaceVisible);
+        });
+      }
     }
 
     // Days interface
@@ -567,7 +563,7 @@ export class Hexcrawl {
     }
 
     game.merlin.hexcrawlEncounterResults = results;
-    //await game.settings.set("merlins-miscellany", "hexcrawlEncounterResults", results);
+    await game.settings.set("merlins-miscellany", "hexcrawlEncounterResults", results);
     this.hexcrawlEncounterControlsVisible = false;
     this._updateEncounterUI();
   }
@@ -804,7 +800,7 @@ export class Hexcrawl {
     }
 
     game.merlin.hexcrawlNavigationResults = results;
-    //await game.settings.set("merlins-miscellany", "hexcrawlNavigationResults", results);
+    await game.settings.set("merlins-miscellany", "hexcrawlNavigationResults", results);
     this.hexcrawlNavigationControlsVisible = false;
     this._updateNavigationUI();
   }
@@ -1192,6 +1188,7 @@ export class Hexcrawl {
     }
     const weatherCode = temperature + wind + precipitation + special;
     this.hexcrawlWeatherLog.push(weatherCode);
+    await game.settings.set("merlins-miscellany", "hexcrawlWeatherLog", hexcrawlWeatherLog);
     let weatherStrings = {};
     this._getWeatherStrings(weatherCode, weatherStrings);
 
@@ -1369,7 +1366,7 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
         id: "hexcrawl-popup",
         classes: ["hexcrawl-popup"],
         window: {
-            title: "Hexcrawl Controls",
+            title: "Hexcrawl Settings",
             resizable: true
         },
         position: {

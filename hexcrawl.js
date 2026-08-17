@@ -223,9 +223,14 @@ export class Hexcrawl {
       if (!this.hexcrawlPopup) {
         this.hexcrawlPopup = new HexcrawlPopup();
       }
-      if (this.hexcrawlMainInterfaceVisible) {
-        hexcrawlControlPanelButton.classList.add("active");
-        this.hexcrawlPopup.render(this.hexcrawlDays > 0);
+      if(show){
+        if (this.hexcrawlMainInterfaceVisible && this.hexcrawlDays > 0) {
+          hexcrawlControlPanelButton.classList.add("active");
+          this.hexcrawlPopup.render(true);
+        }
+      }
+      else{
+        this.hexcrawlPopup.close();
       }
       if (obj.isNew) {
         hexcrawlControlPanelButton.addEventListener("click", () => {
@@ -1380,6 +1385,7 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
 
     constructor(options = {}) {
       super(options);
+      this.showRestartConfirm = false;
     }
   
     static DEFAULT_OPTIONS = {
@@ -1396,12 +1402,12 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
     };
 
     async _onClose(options) {
-        const popupButton = document.getElementById("hexcrawl-control-panel-button");
-        if (popupButton) {
-          popupButton.classList.toggle("active");
-          game.merlin.hexcrawlMainInterfaceVisible = false;
-          game.settings.set("merlins-miscellany", "hexcrawlMainInterfaceVisible", game.merlin.hexcrawlMainInterfaceVisible);
-        }
+      const popupButton = document.getElementById("hexcrawl-control-panel-button");
+      if (popupButton) {
+        popupButton.classList.toggle("active");
+        game.merlin.hexcrawlMainInterfaceVisible = false;
+        game.settings.set("merlins-miscellany", "hexcrawlMainInterfaceVisible", game.merlin.hexcrawlMainInterfaceVisible);
+      }
     }
 
     async _renderHTML(context, options) {
@@ -1422,6 +1428,18 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
               Allow Rerolls
             </label>
           </div>
+          <div class="hexcrawl-popup-restart">
+            <button type="button" name="hexcrawl-restart-adventure">Restart Adventure</button>
+          </div>
+          ${this.showRestartConfirm ? `
+            <div class="hexcrawl-popup-restart-confirm">
+              <div class="hexcrawl-popup-label">Really clear all logs and restart adventure?</div>
+              <div style="display: flex; gap: 0.5em; flex-wrap: wrap;">
+                <button type="button" name="hexcrawl-restart-confirm">Restart</button>
+                <button type="button" name="hexcrawl-restart-cancel">Cancel</button>
+              </div>
+            </div>
+          ` : ""}
         `;
     }
 
@@ -1448,6 +1466,46 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
           game.merlin._updateEncounterUI();
         });
       }
+
+      const restartAdventureButton = content.querySelector('button[name="hexcrawl-restart-adventure"]');
+      if (restartAdventureButton) {
+        restartAdventureButton.addEventListener("click", () => {
+          this.showRestartConfirm = true;
+          this.render(true);
+        });
+      }
+
+      const restartConfirmButton = content.querySelector('button[name="hexcrawl-restart-confirm"]');
+      if (restartConfirmButton) {
+        restartConfirmButton.addEventListener("click", () => {
+          this._restartAdventure();
+          this.showRestartConfirm = false;
+        });
+      }
+
+      const restartCancelButton = content.querySelector('button[name="hexcrawl-restart-cancel"]');
+      if (restartCancelButton) {
+        restartCancelButton.addEventListener("click", () => {
+          this.showRestartConfirm = false;
+          this.render(true);
+        });
+      }
+    }
+
+    async _restartAdventure() {
+      game.merlin.hexcrawlDays = 0;
+      game.merlin.hexcrawlTime = 0;
+      game.merlin.hexcrawlWeatherLog = [];
+      game.merlin.hexcrawlNavigationResults = {};
+      game.merlin.hexcrawlEncounterResults = {};
+      game.settings.set("merlins-miscellany", "hexcrawlDays", game.merlin.hexcrawlDays);
+      game.settings.set("merlins-miscellany", "hexcrawlTime", game.merlin.hexcrawlTime);
+      game.settings.set("merlins-miscellany", "hexcrawlWeatherLog", game.merlin.hexcrawlWeatherLog);
+      game.settings.set("merlins-miscellany", "hexcrawlNavigationResults", game.merlin.hexcrawlNavigationResults);
+      game.settings.set("merlins-miscellany", "hexcrawlEncounterResults", game.merlin.hexcrawlEncounterResults);
+      
+      await this.close();
+      game.merlin._showHexcrawlUI(game.merlin.showHexcrawlUI);
     }
 }
 

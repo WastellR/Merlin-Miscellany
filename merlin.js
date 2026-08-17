@@ -810,25 +810,33 @@ class Merlin extends Hexcrawl{
   
   async _getSceneControlButtons(controls){
     console.log("Merlin | Adding scene control buttons", controls);
-    // Add our toggle button to the tools array
-    const poiButton = {
-      name: "toggleCustomNote",
-      title: "Toggle Points of Interest",
-      icon: "fas fa-eye",
-      toggle: true, // allows Foundry to treat it like a toggle button
-      active: this.userPOIVisibility[game.userId] ?? false,
-      onClick: (toggle) => {
-        // Flip the local variable for this user
-        this.userPOIVisibility[game.userId] = toggle;
-        console.log("Merlin | " + (toggle ? "Showing" : "Hiding") + " Point of Interest Tiles");
-        this._updatePOITilesVisibility();
-      },
-      button: true
-    };
-    controls.tokens.tools[poiButton.name] = poiButton;
+    let bContainsPoiButton = false;
+    for (const tile of canvas.scene.tiles) {
+      if (tile?.flags?.merlin?.isPOI === true) {
+          bContainsPoiButton = true;
+          break;
+      }
+    }
+    if(bContainsPoiButton){
+      // Add our toggle button to the tools array
+      const poiButton = {
+        name: "toggleCustomNote",
+        title: "Toggle Points of Interest",
+        icon: "fas fa-eye",
+        toggle: true, // allows Foundry to treat it like a toggle button
+        active: this.userPOIVisibility[game.userId] ?? false,
+        onClick: (toggle) => {
+          // Flip the local variable for this user
+          this.userPOIVisibility[game.userId] = toggle;
+          console.log("Merlin | " + (toggle ? "Showing" : "Hiding") + " Point of Interest Tiles");
+          this._updatePOITilesVisibility();
+        },
+        button: true
+      };
+      controls.tokens.tools[poiButton.name] = poiButton;
+    }
 
     this._configureHexcrawlSceneControls(controls);
-    
 
     const fogResetTool = controls.lighting?.tools?.reset;
     if (fogResetTool && !fogResetTool._merlinFogMaskWrapped) {

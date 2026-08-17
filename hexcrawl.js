@@ -30,8 +30,7 @@ export class Hexcrawl {
   }
 
   _configureHexcrawlSceneControls(controls) {
-    // Add hexcrawl UI only if we are in a hexcrawl scene
-    if (!canvas.scene?.flags?.merlin?.hexcrawl) return;
+    // Add hexcrawl UI only if we are in a hexcrawl scene    
     // Add hexcrawl UI toggle button
     const hexcrawlButton = {
       name: "toggleHexcrawlUI",
@@ -46,8 +45,8 @@ export class Hexcrawl {
       },
       button: true
     };
-    controls.tokens.tools[hexcrawlButton.name] = hexcrawlButton;
-    this._showHexcrawlUI(this.showHexcrawlUI);
+    if(canvas.scene?.flags?.merlin?.hexcrawl === true) controls.tokens.tools[hexcrawlButton.name] = hexcrawlButton;
+    this._showHexcrawlUI(this.showHexcrawlUI && canvas.scene?.flags?.merlin?.hexcrawl === true);
 
     // Add canvas hover tooltip
     if(this.bAddedBoardListeners) return;

@@ -768,7 +768,7 @@ class Merlin extends Hexcrawl{
         }
       }
 
-      this._hexcrawlOnUpdateToken(movement.destination, token.width, token.height);
+      this._hexcrawlOnUpdateToken(token.id, movement.destination, token.width, token.height);
     }
   }
 

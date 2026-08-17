@@ -709,7 +709,6 @@ export class Hexcrawl {
             tableId = table.id ?? null;
             tableName = table.name ?? null;
             const draw = await table.draw({ displayChat: false });
-            console.log(draw);
             const encounterDraw = this._getEncounterDrawInfo(draw);
             encounterName = encounterDraw.name || tableName || "No Encounter";
             encounterDescription = encounterDraw.description || "";
@@ -969,7 +968,8 @@ export class Hexcrawl {
         return this.terrainSelection;
     }
     if (canvas.scene?.tokens?.size > 0) {
-      const token = canvas.scene.tokens.contents[0];
+      let token = canvas.scene.tokens.get(game.merlin._getPartyTokenId());
+      if(!token) token = canvas.scene.tokens.contents[0];
       let centre = {};
       if (game.merlin.lastTokenMovement != null) {
         centre = {
@@ -1188,7 +1188,7 @@ export class Hexcrawl {
     }
     const weatherCode = temperature + wind + precipitation + special;
     this.hexcrawlWeatherLog.push(weatherCode);
-    await game.settings.set("merlins-miscellany", "hexcrawlWeatherLog", hexcrawlWeatherLog);
+    await game.settings.set("merlins-miscellany", "hexcrawlWeatherLog", this.hexcrawlWeatherLog);
     let weatherStrings = {};
     this._getWeatherStrings(weatherCode, weatherStrings);
 
@@ -1268,8 +1268,9 @@ export class Hexcrawl {
   }
 
   lastTokenMovement = null;
-  async _hexcrawlOnUpdateToken(destination, width, height) {
+  async _hexcrawlOnUpdateToken(id, destination, width, height) {
     if (this.hexcrawlDays <= 0) return;
+    if (this.hexcrawlPartyTokenId != id) return;
     this.lastTokenMovement = {destination: destination, width: width, height: height};
     this._updateNavigationUI();
     this._updateEncounterUI();
@@ -1299,6 +1300,18 @@ export class Hexcrawl {
     const ctx = imageCanvas.getContext("2d");
     ctx.drawImage(image.source, x, y, 1, 1, 0, 0, 1, 1);
     return ctx.getImageData(0, 0, 1, 1).data;
+  }
+
+  _getPartyTokenId() {
+    if(this.hexcrawlPartyTokenId && canvas.scene.tokens.get(this.hexcrawlPartyTokenId)){
+      return this.hexcrawlPartyTokenId;
+    }
+    if(canvas.scene.tokens.size > 0) {
+      this.hexcrawlPartyTokenId = canvas.scene.tokens.contents[0].id;
+      game.settings.set("merlins-miscellany", "hexcrawlPartyTokenId", this.hexcrawlPartyTokenId);
+      return this.hexcrawlPartyTokenId;
+    }
+    return "";    
   }
 
   customTooltips = new Map();
@@ -1386,14 +1399,32 @@ class HexcrawlPopup extends foundry.applications.api.ApplicationV2 {
 
     async _renderHTML(context, options) {
         return `
-            <div class="hexcrawl-navigation-box">
-              <p>Hexcrawl controls have moved to the navigation panel.</p>
-            </div>
+          <div class="hexcrawl-popup-partySelect">
+            <div class="hexcrawl-popup-label">Party Token</div>
+            <select style="color: white">
+              ${canvas.scene.tokens.map(token => `
+                  <option value="${token.id}" ${token.id === game.merlin._getPartyTokenId() ? "selected" : ""}>
+                      ${game.actors.get(token.actorId)?.name}
+                  </option>
+              `).join("")}
+            </select>
+          </div>
         `;
     }
 
     _replaceHTML(result, content, options) {
       content.innerHTML = result;
+
+      const partySelect = content.querySelector(".hexcrawl-popup-partySelect select");
+      if (partySelect) {
+        partySelect.addEventListener("change", (event) => {          
+          game.merlin.hexcrawlPartyTokenId = event.target.value;
+          game.settings.set("merlins-miscellany", "hexcrawlPartyTokenId", game.merlin.hexcrawlPartyTokenId);
+          game.merlin.terrainSelection = "";
+          game.merlin._updateNavigationUI();
+          game.merlin._updateEncounterUI();
+        });
+      }
     }
 }
 
@@ -1577,6 +1608,14 @@ export function registerHexcrawlSettings(game) {
     type: String,
     default: ""
   });
+  game.settings.register("merlins-miscellany", "hexcrawlPartyTokenId", {
+    name: "Hexcrawl Party Token ID",
+    hint: "ID of token used to represent the party in the world",
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
+  });
 
   if (!game.merlin) return;
   game.merlin.showHexcrawlUI = game.settings.get("merlins-miscellany", "showHexcrawlUI");
@@ -1591,4 +1630,5 @@ export function registerHexcrawlSettings(game) {
   game.merlin.hexcrawlEncounterInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlEncounterInterfaceVisible");
   game.merlin.hexcrawlMainInterfaceVisible = game.settings.get("merlins-miscellany", "hexcrawlMainInterfaceVisible");
   game.merlin.hexcrawlNavigatorId = game.settings.get("merlins-miscellany", "hexcrawlNavigatorId");
+  game.merlin.hexcrawlPartyTokenId = game.settings.get("merlins-miscellany", "hexcrawlPartyTokenId");
 }

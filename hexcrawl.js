@@ -345,6 +345,8 @@ export class Hexcrawl {
   async _crawlNextDay() {
     this.hexcrawlDays++;
     this.hexcrawlTime = 0;
+    game.settings.set("merlins-miscellany", "hexcrawlDays", this.hexcrawlDays);
+    game.settings.set("merlins-miscellany", "hexcrawlTime", this.hexcrawlTime);
     this.hexcrawlNavigationControlsVisible = false;
     const numPeriods = this._getHexcrawlPeriodsLength() - this.hexcrawlWeatherLog.length;
     // Generate next day of weather
@@ -361,6 +363,8 @@ export class Hexcrawl {
     if (this.hexcrawlDays <= 1) return;
     this.hexcrawlDays--;
     this.hexcrawlTime = 0;
+    game.settings.set("merlins-miscellany", "hexcrawlDays", this.hexcrawlDays);
+    game.settings.set("merlins-miscellany", "hexcrawlTime", this.hexcrawlTime);
     this.hexcrawlNavigationControlsVisible = false;
     this._updateDaysUI();
     this._updateWeatherUI();
@@ -372,6 +376,7 @@ export class Hexcrawl {
       this._crawlNextDay();
     } else {
       this.hexcrawlTime++;
+      game.settings.set("merlins-miscellany", "hexcrawlTime", this.hexcrawlTime);
       if (this._getHexcrawlPeriodsLength() > this.hexcrawlWeatherLog.length) {
         await this._crawlNextPeriodWeather();
       }
@@ -388,6 +393,8 @@ export class Hexcrawl {
     } else {
       this.hexcrawlTime--;
     }
+    game.settings.set("merlins-miscellany", "hexcrawlDays", this.hexcrawlDays);
+    game.settings.set("merlins-miscellany", "hexcrawlTime", this.hexcrawlTime);
     this._updateDaysUI();
     this._updateWeatherUI();
   }

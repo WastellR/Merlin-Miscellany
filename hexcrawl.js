@@ -636,7 +636,7 @@ export class Hexcrawl {
     const resultBox = hexcrawlEncounterInterface.querySelector(".hexcrawl-encounter-box");
     if (resultBox) {
       const hasEncounter = !showControls && encounterResult?.encounterName && encounterResult.encounterName !== "No Encounter"
-        && encounterResult?.encounterName != "Encounter!";
+        && encounterResult?.encounterDescription != "";
       resultBox.classList.toggle("hexcrawl-encounter-box-result", hasEncounter);
       if (hasEncounter && !resultBox.dataset.bound) {
         resultBox.dataset.bound = "true";
@@ -690,7 +690,7 @@ export class Hexcrawl {
             <div class="hexcrawl-control-title">Terrain</div>
             <select style="color: white">
               ${[...terrains].map(([key, value]) => `
-                <option value="${key}" ${key === terrainSelection ? "selected" : ""}>
+                <option value="${key}" ${key === terrainSelection[2].toString(16) ? "selected" : ""}>
                   ${value}
                 </option>
               `).join("")}
@@ -722,8 +722,9 @@ export class Hexcrawl {
     if (encounter && !encounter.dataset.bound) {
       encounter.dataset.bound = "true";
       encounter.addEventListener("click", async () => {
-        const terrainSelection = this.terrainSelection || (await this._getNavigationTerrainSelection());
-        const terrainName = this._getAvailableTerrains()?.get(terrainSelection) ?? terrainSelection ?? "";
+        const terrainSelection = this.terrainSelection || (await this._getNavigationTerrainSelection()).toString(16);
+        const terrainTitleCode = terrainSelection.toString(16);
+        const terrainName = this._getAvailableTerrains()?.get(terrainTitleCode) ?? terrainTitleCode ?? "";
         const day = this.hexcrawlDays;
         const time = this.hexcrawlTime;
         const roll = await new Roll("1d20").evaluate();
@@ -732,15 +733,18 @@ export class Hexcrawl {
         let encounterDescription = "";
         let tableId = null;
         let tableName = null;
+        let bRolledEncounter = false;
+        let tableRoll = null;
 
         if (d20 >= 16) {
+          bRolledEncounter = true;
           const table = this._getEncounterTable(terrainSelection);
           if (table) {
             tableId = table.id ?? null;
             tableName = table.name ?? null;
-            const draw = await table.draw({ displayChat: false });
-            const encounterDraw = this._getEncounterDrawInfo(draw);
-            encounterName = encounterDraw.name || tableName || "No Encounter";
+            tableRoll = await table.draw({ displayChat: false });
+            const encounterDraw = this._getEncounterDrawInfo(tableRoll);
+            encounterName = encounterDraw.name || "Encounter!";
             encounterDescription = encounterDraw.description || "";
           }
           else{
@@ -764,19 +768,65 @@ export class Hexcrawl {
         await roll.toMessage({
           flavor: `Encounter Roll | Day ${day}, ${this._getTimeofDayString(time)}: ${encounterName} ${encounterName != "No Encounter" && !tableId ? " (No Rollable Table)" : ""}`
         });
+        if(bRolledEncounter){
+          await ChatMessage.create({
+            content: `
+              <div class="dice-roll">
+                <div class="dice-result">
+                  <div>${tableName} Roll${encounterName != "Encounter" && encounterName != "No Encounter" ? (": " + encounterName) : ""}</div>
+                  <div class="dice-formula">${tableRoll.roll._formula}</div>
+                  <div class="dice-total">${tableRoll.roll._total}</div>
+                </div>
+              </div>
+            `
+          });          
+        }
       });
     }
   }
 
-  _getEncounterTable(terrainSelection) {    
+  _getEncounterTable(inTerrainSelection) {    
     const tables = game.tables?.contents ?? [];
-    return tables.find(table => {
-      const flagValue = table.flags?.merlin?.hexcrawlEncounters;
-      if (Array.isArray(flagValue)) {
-        return flagValue.map(value => `${value}`).includes(`${terrainSelection}`);
-      }
-      return `${flagValue ?? ""}` === `${terrainSelection}`;
-    }) ?? null;
+    
+    function getTable(terrainSelection) {
+        return tables.find(table => {
+        const flagValue = table.flags?.merlin?.hexcrawlEncounters;
+        if(flagValue === undefined) return null;
+        if (Array.isArray(flagValue)) {
+          if (flagValue.some(value => game.merlin._matchTerrainCodes(value, terrainSelection))) return table;
+        }
+        return game.merlin._matchTerrainCodes(flagValue, terrainSelection) ? table : null;
+      }) ?? null;
+    }
+    // Prioritise water encounters
+    let terrainSelection = {...inTerrainSelection};
+    if(terrainSelection[0] != 0){
+      terrainSelection[1], terrainSelection[2] = 0;
+      const table = getTable(terrainSelection);
+      if(table != null) return table;
+      terrainSelection = {...inTerrainSelection};
+    }
+    return getTable(terrainSelection);
+  }
+
+  _matchTerrainCodes(terrainCode, terrainSelection){
+    // terrainCode is the string attached to a table's flags, e.g. "10" == Coast, "001020" = Light Undead Jungle, "0010xx" = Light Undead, any terrain
+    // terrainSelection is the unformatted pixel code
+    if (terrainCode.length === 2) {
+      return terrainCode == "xx" || terrainCode === this._getTerrainCodeString(terrainSelection[2]);
+    }
+    else if (terrainCode.length === 6) {
+      let match = terrainCode.substring(0,2) === "xx" || terrainCode.substring(0,2) === this._getTerrainCodeString(terrainSelection[0]);
+      match &&= terrainCode.substring(2,4) === "xx" || terrainCode.substring(2,4) === this._getTerrainCodeString(terrainSelection[1]);
+      match &&= terrainCode.substring(4,6) === "xx" || terrainCode.substring(4,6) === this._getTerrainCodeString(terrainSelection[2]);
+      return match;
+    }
+  }
+
+  _getTerrainCodeString(code){
+    let string = code.toString(16);
+    if(code < 16) string = "0" + string;
+    return string;
   }
 
   _getEncounterDrawName(drawResult) {
@@ -802,7 +852,7 @@ export class Hexcrawl {
 
     const day = encounterResult.day ?? this.hexcrawlDays;
     const time = encounterResult.time ?? this.hexcrawlTime;
-    const title = `Day ${day}, ${this._getTimeofDayString(time)} Encounter: ${encounterResult.encounterName}`;
+    const title = `Day ${day}, ${this._getTimeofDayString(time)} Encounter${encounterResult.encounterName != "Encounter!" ? (": " + encounterResult.encounterName) : ""}`;
     new HexcrawlEncounterPopup({
       window: {
         title
@@ -971,7 +1021,7 @@ export class Hexcrawl {
             <div class="hexcrawl-control-title">Terrain</div>
             <select style="color: white">
               ${[...terrains].map(([key, value]) => `
-                <option value="${key}" ${key === terrainSelection ? "selected" : ""}>
+                <option value="${key}" ${key === terrainSelection[2].toString(16) ? "selected" : ""}>
                   ${value}
                 </option>
               `).join("")}
@@ -1013,7 +1063,7 @@ export class Hexcrawl {
         };
       }
       const pixel = await game.merlin._getTerrainMapPixel(centre.x, centre.y);
-      if (pixel) return pixel[2].toString(16);
+      if (pixel) return pixel;
     }
     const terrains = game.merlin._getAvailableTerrains?.();
     const firstTerrain = terrains ? [...terrains.keys()][0] : "";
@@ -1566,52 +1616,8 @@ class HexcrawlEncounterPopup extends foundry.applications.api.ApplicationV2 {
         }
     };
 
-    _sanitizeEncounterHTML(html) {
-      const template = document.createElement("template");
-      template.innerHTML = String(html ?? "").replace(/\n/g, "<br>");
-
-      const allowedTags = new Set(["P", "BR", "STRONG", "B", "EM", "I", "UL", "OL", "LI", "SPAN", "DIV", "A"]);
-      const walk = (root) => {
-        for (const node of [...root.childNodes]) {
-          if (node.nodeType === Node.TEXT_NODE) continue;
-          if (node.nodeType !== Node.ELEMENT_NODE) {
-            node.remove();
-            continue;
-          }
-
-          const element = node;
-          if (!allowedTags.has(element.tagName)) {
-            const parent = element.parentNode;
-            while (element.firstChild) parent.insertBefore(element.firstChild, element);
-            element.remove();
-            continue;
-          }
-
-          for (const attr of [...element.attributes]) {
-            if (element.tagName === "A" && ["href", "title", "target", "rel"].includes(attr.name)) continue;
-            element.removeAttribute(attr.name);
-          }
-
-          if (element.tagName === "A") {
-            const href = element.getAttribute("href") ?? "";
-            if (!/^(https?:|mailto:|#)/i.test(href)) {
-              element.removeAttribute("href");
-            }
-            if (element.getAttribute("target") === "_blank") {
-              element.setAttribute("rel", "noopener noreferrer");
-            }
-          }
-
-          walk(element);
-        }
-      };
-
-      walk(template.content);
-      return template.innerHTML;
-    }
-
     async _renderHTML(context, options) {
-      const description = this._sanitizeEncounterHTML(this.encounterDescription ?? "");
+      const description = await TextEditor.enrichHTML(this.encounterDescription ?? "");
       return `
         <div class="hexcrawl-encounter-popup-box">
           <div class="hexcrawl-encounter-popup-description">${description}</div>

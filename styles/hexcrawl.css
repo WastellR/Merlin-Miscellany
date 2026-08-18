@@ -258,6 +258,7 @@
     white-space: pre-wrap;
     max-height: 240px;
     overflow-y: auto;
+    margin: 5px;
 }
 
 .hexcrawl-encounter-popup-description p {

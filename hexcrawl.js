@@ -599,6 +599,7 @@ export class Hexcrawl {
   }
 
   async _updateEncounterUI() {
+    if(!this.showHexcrawlUI) return;
     const encounterResult = this._getEncounterResult();
     const hexcrawlEncounterInterface = document.getElementById("hexcrawl-encounter-interface");
     if (!hexcrawlEncounterInterface) return;
@@ -885,6 +886,7 @@ export class Hexcrawl {
   }
 
   async _updateNavigationUI() {
+    if(!this.showHexcrawlUI) return;
     const navigationResult = this._getNavigationResult();
     const hexcrawlNavigationInterface = document.getElementById("hexcrawl-navigation-interface");
     if (!hexcrawlNavigationInterface) return;
@@ -1067,7 +1069,7 @@ export class Hexcrawl {
     }
     const terrains = game.merlin._getAvailableTerrains?.();
     const firstTerrain = terrains ? [...terrains.keys()][0] : "";
-    return firstTerrain || "";
+    return [0, 0, parseInt(firstTerrain, 16)];
   }
 
   _bindNavigationControls(container) {

@@ -679,6 +679,7 @@ class Merlin extends Hexcrawl{
   _runMerlinTileTrigger(tile, token = null, triggerType = "movement") {
     const merlinFlags = tile?.document?.flags?.merlin;
     if (!merlinFlags?.active) return;
+    this.lastTriggerType = triggerType;
 
     const code = merlinFlags.runCode;
     if (code) {

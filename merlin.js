@@ -375,6 +375,7 @@ class Merlin extends Hexcrawl{
 
   async _onCanvasReady(canvas) {
     console.log("Merlin | Canvas Ready");
+    this.tileCaption = null;
     this._hideTileCaption();
     this._bindTileCaptionListeners();
     setTimeout(() => {
@@ -587,9 +588,9 @@ class Merlin extends Hexcrawl{
   _hideTileCaption() {
     this.bShowingTileCaption = false;
 
-    if (this.tileCaption) {
-      this.tileCaption.parent?.removeChild(this.tileCaption);
-      this.tileCaption.destroy();
+    if (this.tileCaption && this.tileCaption != null) {
+      this.tileCaption?.parent?.removeChild(this.tileCaption);
+      this.tileCaption?.destroy();
     }
     this.tileCaption = null;
     this.tileCaptionTileId = null;

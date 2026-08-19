@@ -62,7 +62,8 @@ export class Hexcrawl {
       hideTooltip();
       if (!game.merlin.showHexcrawlUI) return;
       if (!canvas.scene?.flags?.merlin?.hexcrawl) return;
-      if (!canvas.scene?.flags?.merlin?.hexcrawlTerrain) return;      
+      if (!canvas.scene?.flags?.merlin?.hexcrawlTerrain) return;
+      if (game.merlin.bShowingTileCaption) return;
       if (!game.merlin.hexcrawlTerrainImages.has(canvas.scene.flags.merlin.hexcrawlTerrain)) {
         const newTerrainTexture = await game.merlin._loadTexture(canvas.scene.flags.merlin.hexcrawlTerrain);
         if(newTerrainTexture){

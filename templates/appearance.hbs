@@ -24,4 +24,31 @@
                 name="flags.merlin.isPOI"
                 {{checked source.flags.merlin.isPOI}} />
     </div>
+    <div class="form-group">
+        <label for="{{concat rootId "-" "merlin-caption"}}">Caption</label>
+        <input id="{{concat rootId "-" "merlin-caption"}}"
+               type="text"
+               class="form-control"
+               name="flags.merlin.caption"
+               value="{{source.flags.merlin.caption}}"
+               placeholder="" />
+    </div>
+    <div class="form-group">
+        <label for="{{concat rootId "-" "merlin-captionFont"}}">Caption Font</label>
+        <select id="{{concat rootId "-" "merlin-captionFont"}}"
+                class="form-control"
+                name="flags.merlin.captionFont">
+            {{selectOptions captionFontChoices selected=source.flags.merlin.captionFont}}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="{{concat rootId "-" "merlin-captionFontSize"}}">Caption Font Size</label>
+        <input id="{{concat rootId "-" "merlin-captionFontSize"}}"
+               type="number"
+               class="form-control"
+               name="flags.merlin.captionFontSize"
+               value="{{source.flags.merlin.captionFontSize}}"
+               min="1"
+               step="1" />
+    </div>
 </div>

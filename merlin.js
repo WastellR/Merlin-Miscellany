@@ -79,6 +79,17 @@ class Merlin extends Hexcrawl{
     Hooks.on("updateToken", this._onUpdateToken.bind(this));
     Hooks.on("getSceneControlButtons", this._getSceneControlButtons.bind(this));
     Hooks.on("updateTile", this._onUpdateTile.bind(this));
+    Hooks.on("hoverTile", this._onHoverTile.bind(this));
+
+    // Register fonts
+    CONFIG.fontDefinitions["Jubilee Medium"] = {
+        editor: true,
+        fonts: [
+            {
+                urls: ["modules/merlins-miscellany/fonts/JubileeMedium.ttf"]
+            }
+        ]
+    };
   }
 
   usersUseMerlinVideo = {};
@@ -86,6 +97,14 @@ class Merlin extends Hexcrawl{
   teleportTileIds = {};
   // Scene IDs where we have already built the base teleport tile map
   builtTeleportTileScenes = new Set();
+  // Active hover caption for tiles
+  tileCaption = null;
+  tileCaptionTileId = null;
+  tileCaptionText = "";
+  tileCaptionFont = "";
+  tileCaptionFontSize = 18;
+  tileCaptionBoardListenersBound = false;
+  bShowingTileCaption = false;
   
   // The scene control (left-side control buttons) that was previously active
   prevActiveControl = "";
@@ -159,6 +178,9 @@ class Merlin extends Hexcrawl{
             teleportIdentifier: merlinFlags.teleportIdentifier ?? "",
             teleportIdentifierPrev: merlinFlags.teleportIdentifierPrev ?? "",
             isPOI: !!merlinFlags.isPOI,
+            caption: merlinFlags.caption ?? "",
+            captionFont: merlinFlags.captionFont ?? CONFIG.defaultFontFamily,
+            captionFontSize: Number(merlinFlags.captionFontSize ?? 18) || 18,
             topLeftX: merlinFlags.topLeftX ?? null,
             topLeftY: merlinFlags.topLeftY ?? null
           };
@@ -181,6 +203,9 @@ class Merlin extends Hexcrawl{
               teleportIdentifier: this.document.getFlag("merlin", "teleportIdentifier") ?? "",
               teleportIdentifierPrev: this.document.getFlag("merlin", "teleportIdentifierPrev") ?? "",
               isPOI: this.document.getFlag("merlin", "isPOI") ?? false,
+              caption: this.document.getFlag("merlin", "caption") ?? "",
+              captionFont: this.document.getFlag("merlin", "captionFont") ?? CONFIG.defaultFontFamily,
+              captionFontSize: this.document.getFlag("merlin", "captionFontSize") ?? 18,
               topLeftX: this.document.getFlag("merlin", "topLeftX") ?? null,
               topLeftY: this.document.getFlag("merlin", "topLeftY") ?? null
             }
@@ -191,6 +216,15 @@ class Merlin extends Hexcrawl{
         /** @override */
         async _preparePartContext(partId, context, options) {
           const partContext = await super._preparePartContext(partId, context, options);
+          if (partId === "appearance") {
+            const fontChoices = foundry.applications?.settings?.menus?.FontConfig?.getAvailableFontChoices?.() ?? {};
+            const currentFont = partContext.source?.flags?.merlin?.captionFont;
+            fontChoices[CONFIG.defaultFontFamily] ??= CONFIG.defaultFontFamily;
+            if (currentFont) fontChoices[currentFont] ??= currentFont;
+            partContext.captionFontChoices = Object.keys(fontChoices).length ? fontChoices : {
+              [CONFIG.defaultFontFamily]: CONFIG.defaultFontFamily
+            };
+          }
           if (partId === "merlin") {
             partContext.triggerOptions = MerlinTileConfig.#MERLIN_TRIGGERS.map(trigger => ({
               value: trigger,
@@ -341,6 +375,8 @@ class Merlin extends Hexcrawl{
 
   async _onCanvasReady(canvas) {
     console.log("Merlin | Canvas Ready");
+    this._hideTileCaption();
+    this._bindTileCaptionListeners();
     setTimeout(() => {
       this._updatePOITilesVisibility();
     }, 100);
@@ -447,6 +483,119 @@ class Merlin extends Hexcrawl{
       tileDocument.update({"flags.merlin.topLeftX": coords.x});
       tileDocument.update({"flags.merlin.topLeftY": coords.y});
     }    
+  }
+
+  _onHoverTile(tile, hovered) {
+    if (!tile) return;
+    if (!hovered || ui.controls?.control?.name === "tiles") {
+      if (this.tileCaptionTileId === tile.id) this._hideTileCaption();
+    }
+  }
+
+  _bindTileCaptionListeners() {
+    if (this.tileCaptionBoardListenersBound) return;
+
+    const board = document.querySelector("#board");
+    if (!board) return;
+
+    board.addEventListener("mousemove", this._handleTileCaptionMouseMove.bind(this));
+    board.addEventListener("mouseleave", () => this._hideTileCaption());
+    this.tileCaptionBoardListenersBound = true;
+  }
+
+  _handleTileCaptionMouseMove(event) {
+    if (!canvas?.ready || !canvas.scene || !canvas.app?.view?.contains(event.target)) return;
+    if (ui.controls?.control?.name === "tiles") {
+      this._hideTileCaption();
+      return;
+    }
+
+    const {x, y} = canvas.canvasCoordinatesFromClient({x: event.clientX, y: event.clientY});
+    const pointer = new PIXI.Point(x, y);
+    const tiles = canvas.tiles?.placeables ?? [];
+
+    let targetTile = null;
+    for (const tile of tiles) {
+      const merlinFlags = tile?.document?.flags?.merlin;
+      if (!merlinFlags?.active) continue;
+      if (!this._tileContainsPoint(tile, pointer)) continue;
+      if (merlinFlags.isPOI && !this.userPOIVisibility[game.userId]) continue;
+      const caption = merlinFlags.caption?.trim?.() ?? "";
+      if (!caption) continue;
+      targetTile = tile;
+      break;
+    }
+
+    if (!targetTile) {
+      this._hideTileCaption();
+      return;
+    }
+
+    const caption = targetTile.document?.flags?.merlin?.caption?.trim?.() ?? "";
+    const captionFont = targetTile.document?.flags?.merlin?.captionFont?.trim?.() || CONFIG.defaultFontFamily;
+    const captionFontSize = Number(targetTile.document?.flags?.merlin?.captionFontSize ?? 18) || 18;
+
+    if (
+      this.tileCaptionTileId === targetTile.id &&
+      this.tileCaptionText === caption &&
+      this.tileCaptionFont === captionFont &&
+      this.tileCaptionFontSize === captionFontSize
+    ) {
+      return;
+    }
+
+    this._showTileCaption(targetTile, caption, captionFont, captionFontSize);
+  }
+
+  _showTileCaption(tile, caption, captionFont = CONFIG.defaultFontFamily, captionFontSize = 18) {
+    this._hideTileCaption();
+
+    const parent = canvas?.interface ?? canvas?.stage;
+    const bounds = tile?.bounds;
+    if (!parent || !bounds) return;
+
+    this.bShowingTileCaption = true;
+
+    const text = new PIXI.Text(caption, {
+      fontFamily: captionFont,
+      fontSize: captionFontSize,
+      fill: "#ffffff",
+      align: "center",
+      stroke: "#000000",
+      strokeThickness: 4,
+      dropShadow: true,
+      dropShadowColor: "#000000",
+      dropShadowBlur: 2,
+      dropShadowDistance: 0
+    });
+
+    text.anchor.set(0.5, 0);
+    text.eventMode = "none";
+    text.interactive = false;
+    text.interactiveChildren = false;
+    text.zIndex = 1000000;
+    text.position.set(bounds.x + (bounds.width / 2), bounds.y + bounds.height + 8);
+
+    parent.addChild(text);
+    this.tileCaption = text;
+    this.tileCaptionTileId = tile.id;
+    this.tileCaptionText = caption;
+    this.tileCaptionFont = captionFont;
+    this.tileCaptionFontSize = captionFontSize;
+  }
+
+  _hideTileCaption() {
+    this.bShowingTileCaption = false;
+
+    if (this.tileCaption) {
+      this.tileCaption.parent?.removeChild(this.tileCaption);
+      this.tileCaption.destroy();
+    }
+    this.tileCaption = null;
+    this.tileCaptionTileId = null;
+    this.tileCaptionText = "";
+    this.tileCaptionFont = "";
+    this.tileCaptionFontSize = 18;
   }
 
   _getTileTopLeftCoords(x, y, width, height){

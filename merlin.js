@@ -988,6 +988,8 @@ class Merlin extends Hexcrawl{
     }
 
     // Determine target background for this scene
+    this.currentBackgroundInfo = backgroundInfo;
+    let desiredBackgroundInfo = {};
     if(this.globalMerlinWeatherEnabled){
       if(!this.globalMerlinWeather){
         this.globalMerlinWeather = backgroundInfo.weather;
@@ -995,24 +997,22 @@ class Merlin extends Hexcrawl{
       if(!this.globalMerlinTime){
         this.globalMerlinTime = backgroundInfo.time;
       }
-      this.currentBackgroundInfo.weather = this.globalMerlinWeather;
-      this.currentBackgroundInfo.time = this.globalMerlinTime;
+      desiredBackgroundInfo.weather = this.globalMerlinWeather;
+      desiredBackgroundInfo.time = this.globalMerlinTime;
     }
     else{
       if(!this.sceneMerlinWeather[canvas.scene.id]){
         this.sceneMerlinWeather[canvas.scene.id] = backgroundInfo.weather;
-      }
-      this.currentBackgroundInfo.weather = this.sceneMerlinWeather[canvas.scene.id];
+      }      
       if(!this.sceneMerlinTime[canvas.scene.id]){
         this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
       }
-      this.currentBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
+      desiredBackgroundInfo.weather = this.sceneMerlinWeather[canvas.scene.id];
+      desiredBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
     }
-    this.currentBackgroundInfo.isVideo = this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo;
+    desiredBackgroundInfo.isVideo = this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo;
     // Attempt to switch to it if we have a suitable background, else fall back to the current background
-    if(!this._updateBackground(this.currentBackgroundInfo)){
-       this.currentBackgroundInfo = backgroundInfo;
-    }
+    this._updateBackground(desiredBackgroundInfo);
 
     // De/activate night and rain sounds if any
     for(let sound of canvas.scene.sounds){

@@ -951,6 +951,7 @@ class Merlin extends Hexcrawl{
   userPOIVisibility = {};
   // The weather and time settings for this scene, if any
   sceneMerlinRain = {};
+  sceneMerlinWind = {};
   sceneMerlinTime = {};
   // Map of keys to filenames
   sceneBackgroundFilenames = {};
@@ -1045,6 +1046,8 @@ class Merlin extends Hexcrawl{
     let hasAnimated = backgroundInfo.isVideo;
     const hasRainTypes = new Set();
     hasRainTypes.add(backgroundInfo.rain);
+    const hasWindTypes = new Set();
+    hasWindTypes.add(backgroundInfo.wind);
     const hasTimes = new Set();
     hasTimes.add(backgroundInfo.time);
     this.sceneBackgroundFilenames = {};
@@ -1076,6 +1079,7 @@ class Merlin extends Hexcrawl{
         hasStatic |= !fBackgroundInfo.isVideo;
         hasAnimated |= fBackgroundInfo.isVideo;
         if(fBackgroundInfo.rain) hasRainTypes.add(fBackgroundInfo.rain);
+        if(fBackgroundInfo.wind) hasWindTypes.add(fBackgroundInfo.wind);
         if(fBackgroundInfo.time) hasTimes.add(fBackgroundInfo.time);
 
         key = this._getKeyFromBackgroundInfo(fBackgroundInfo);
@@ -1122,10 +1126,10 @@ class Merlin extends Hexcrawl{
         }
         else{
           const sameWeatherTimeKey = this._getKeyFromBackgroundInfo(bgInfo);
-          const sameTimeKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none" });
+          const sameTimeKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none", wind: "none" });
           const sameWeatherKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day" });
-          const sameWeatherTimeVideoKey = this._getKeyFromBackgroundInfo( bgInfo, {isVideo: !bgInfo.isVideo});
-          const sameTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none", isVideo: !bgInfo.isVideo });
+          const sameWeatherTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, isVideo: !bgInfo.isVideo });
+          const sameTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none", wind: "none", isVideo: !bgInfo.isVideo });
           const sameWeatherVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day", isVideo: !bgInfo.isVideo });
           fgPath = this.sceneForegroundFilenames[sameWeatherTimeKey] || this.sceneForegroundFilenames[sameTimeKey] || this.sceneForegroundFilenames[sameWeatherKey] 
             || this.sceneForegroundFilenames[sameWeatherTimeVideoKey] || this.sceneForegroundFilenames[sameTimeVideoKey] || this.sceneForegroundFilenames[sameWeatherVideoKey]
@@ -1147,10 +1151,10 @@ class Merlin extends Hexcrawl{
         }
         else{
           const sameWeatherTimeKey = this._getKeyFromBackgroundInfo(bgInfo);
-          const sameTimeKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none" });
+          const sameTimeKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none", wind: "none" });
           const sameWeatherKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day" });
-          const sameWeatherTimeVideoKey = this._getKeyFromBackgroundInfo( bgInfo, {isVideo: !bgInfo.isVideo});
-          const sameTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none", isVideo: !bgInfo.isVideo });
+          const sameWeatherTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, isVideo: !bgInfo.isVideo });
+          const sameTimeVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, rain: "none", wind: "none", isVideo: !bgInfo.isVideo });
           const sameWeatherVideoKey = this._getKeyFromBackgroundInfo({ ...bgInfo, time: "day", isVideo: !bgInfo.isVideo });
           fowPath = this.sceneForgroundFOWFilenames[sameWeatherTimeKey] || this.sceneForgroundFOWFilenames[sameTimeKey] || this.sceneForgroundFOWFilenames[sameWeatherKey] 
             || this.sceneForgroundFOWFilenames[sameWeatherTimeVideoKey] || this.sceneForgroundFOWFilenames[sameTimeVideoKey] || this.sceneForgroundFOWFilenames[sameWeatherVideoKey]
@@ -1168,20 +1172,28 @@ class Merlin extends Hexcrawl{
       if(!this.globalMerlinRain){
         this.globalMerlinRain = backgroundInfo.rain;
       }
+      if(!this.globalMerlinWind){
+        this.globalMerlinWind = backgroundInfo.wind;
+      }
       if(!this.globalMerlinTime){
         this.globalMerlinTime = backgroundInfo.time;
       }
       desiredBackgroundInfo.rain = this.globalMerlinRain;
+      desiredBackgroundInfo.wind = this.globalMerlinWind;
       desiredBackgroundInfo.time = this.globalMerlinTime;
     }
     else{
       if(!this.sceneMerlinRain[canvas.scene.id]){
         this.sceneMerlinRain[canvas.scene.id] = backgroundInfo.rain;
       }      
+      if(!this.sceneMerlinWind[canvas.scene.id]){
+        this.sceneMerlinWind[canvas.scene.id] = backgroundInfo.wind;
+      }
       if(!this.sceneMerlinTime[canvas.scene.id]){
         this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
       }
       desiredBackgroundInfo.rain = this.sceneMerlinRain[canvas.scene.id];
+      desiredBackgroundInfo.wind = this.sceneMerlinWind[canvas.scene.id];
       desiredBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
     }
     desiredBackgroundInfo.isVideo = this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo;
@@ -1272,6 +1284,34 @@ class Merlin extends Hexcrawl{
       controls.lighting.tools[weatherSelect.name] = weatherSelect;
     }
 
+    if(hasWindTypes.size > 1) {
+      let states = ["none"];
+      if(hasWindTypes.has("wind")){
+        states.push("wind");
+      }
+      if(hasWindTypes.has("highWind")){
+        states.push("highWind");
+      }
+      const windSelect = {
+        name: "selectMerlinWind",
+        title: "Switch Wind",
+        icon: "fas fa-wind",
+        button: hasWindTypes.size === 3,
+        toggle: hasWindTypes.size === 2,
+        active: (hasWindTypes.size === 2 && this.currentBackgroundInfo.wind !== "none"),
+        onChange: (toggle) => {
+          const current = this.currentBackgroundInfo.wind;
+          const currentIndex = states.indexOf(current);
+          const next = states[(currentIndex + 1) % states.length];
+          let desiredBackgroundInfo = {...this.currentBackgroundInfo};
+          desiredBackgroundInfo.wind = next;
+          console.log("Merlin | Switching wind to: " + next);
+          this._updateBackground(desiredBackgroundInfo);
+        }
+      };
+      controls.lighting.tools[windSelect.name] = windSelect;
+    }
+
     // Refresh controls UI after background reload.
     if(controls.lighting.active){
       const button = document.querySelector(
@@ -1314,29 +1354,46 @@ class Merlin extends Hexcrawl{
     const base = filename.substring(0, filename.lastIndexOf('.'));
     // Simple heuristic: if it's a video format, treat it as animated. Otherwise static.
     const videoFormats = ["mp4", "webm", "ogg"];
-    const rainTypes = ["none", "rain", "heavyRain"];
-    const times = ["day", "night", "dusk", "dawn"];
+    const weatherTypes = new Map([
+      ["rain", "rain"],
+      ["heavyrain", "heavyRain"],
+      ["wind", "wind"],
+      ["highwind", "highWind"]
+    ]);
+    const times = new Map([
+      ["day", "day"],
+      ["night", "night"],
+      ["dusk", "dusk"],
+      ["dawn", "dawn"]
+    ]);
     
     const parts = base.split("_");
-    const stem = parts.slice(0, Math.max(1, parts.length-3)).join("_");
-    const suffixes = parts.slice(Math.max(1, parts.length-3), parts.length);
+    const stem = parts.slice(0, Math.max(1, parts.length-4)).join("_");
+    const suffixes = parts.slice(Math.max(1, parts.length-4), parts.length);
     let rainType = "none";
+    let windType = "none";
     let time = "day";
     let isFG = false;
     let isFOW = false;
     let miscSuffix = false;
     for(let s of suffixes){
-      s = s.toLowerCase();      
-      if(rainTypes.includes(s)){
-        rainType = s;
+      const normalized = s.toLowerCase();
+      if(weatherTypes.has(normalized)){
+        const weatherType = weatherTypes.get(normalized);
+        if(weatherType === "rain" || weatherType === "heavyRain"){
+          rainType = weatherType;
+        }
+        else{
+          windType = weatherType;
+        }
       }
-      else if(times.includes(s)){
-        time = s;
+      else if(times.has(normalized)){
+        time = times.get(normalized);
       }
-      else if(s === "fg"){
+      else if(normalized === "fg"){
         isFG = true;
       }
-      else if(s === "fow"){
+      else if(normalized === "fow"){
         isFOW = true;
       }
       else{
@@ -1349,6 +1406,7 @@ class Merlin extends Hexcrawl{
       isFG: isFG,
       isFOW: isFOW,
       rain: rainType,
+      wind: windType,
       time: time,
       miscSuffix: miscSuffix,
       stem: stem,
@@ -1370,6 +1428,7 @@ class Merlin extends Hexcrawl{
     const backgroundInfo = filename ? this._getBackgroundTypeFromFilename(filename) : {
       isVideo: false,
       rain: "none",
+      wind: "none",
       time: "day"
     };
 
@@ -1377,6 +1436,7 @@ class Merlin extends Hexcrawl{
       backgroundPath,
       activeLevel,
       rain: this.sceneMerlinRain[canvas.scene.id] ?? backgroundInfo.rain,
+      wind: this.sceneMerlinWind[canvas.scene.id] ?? backgroundInfo.wind,
       time: this.sceneMerlinTime[canvas.scene.id] ?? backgroundInfo.time,
       isVideo: this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo
     };
@@ -1396,6 +1456,7 @@ class Merlin extends Hexcrawl{
     const targetInfo = {
       isVideo: variantInfo?.isVideo ?? baseInfo.isVideo,
       rain: variantInfo?.rain ?? baseInfo.rain,
+      wind: variantInfo?.wind ?? baseInfo.wind,
       time: variantInfo?.time ?? baseInfo.time
     };
 
@@ -1415,6 +1476,7 @@ class Merlin extends Hexcrawl{
         const score = [
           fInfo.time === targetInfo.time ? 1 : 0,
           fInfo.rain === targetInfo.rain ? 1 : 0,
+          fInfo.wind === targetInfo.wind ? 1 : 0,
           fInfo.isVideo === targetInfo.isVideo ? 1 : 0,
           fInfo.miscSuffix ? 0 : 1
         ];
@@ -1459,7 +1521,7 @@ class Merlin extends Hexcrawl{
   }
 
   _getKeyFromBackgroundInfo(backgroundInfo){
-    return `${backgroundInfo.isVideo}_${backgroundInfo.rain}_${backgroundInfo.time}`;
+    return `${backgroundInfo.isVideo}_${backgroundInfo.rain}_${backgroundInfo.wind}_${backgroundInfo.time}`;
   }
 
   async _updateBackground(backgroundInfo){
@@ -1489,18 +1551,36 @@ class Merlin extends Hexcrawl{
     }
     this.displayOverlays(newRainOverlays);
 
-    // Update background, fallback to other rain type if needed
+    // Update background, fallback to nearby weather variants if needed
     let targetKey = this._getKeyFromBackgroundInfo(backgroundInfo);
     let bChangedBG = false;
     if(!this.sceneBackgroundFilenames[targetKey]){
-      let fallbackBackgroundInfo = {...backgroundInfo};
-      if(backgroundInfo.rain == "rain"){
-        fallbackBackgroundInfo.rain = "heavyRain";
+      const fallbackCandidates = [];
+      const addCandidate = (candidate) => {
+        const candidateKey = this._getKeyFromBackgroundInfo(candidate);
+        if(!fallbackCandidates.some(entry => this._getKeyFromBackgroundInfo(entry) === candidateKey)){
+          fallbackCandidates.push(candidate);
+        }
+      };
+      const rainOrder = backgroundInfo.rain === "none"
+        ? ["none", "rain", "heavyRain"]
+        : [backgroundInfo.rain, backgroundInfo.rain === "rain" ? "heavyRain" : "rain", "none"];
+      const windOrder = backgroundInfo.wind === "none"
+        ? ["none", "wind", "highWind"]
+        : [backgroundInfo.wind, backgroundInfo.wind === "wind" ? "highWind" : "wind", "none"];
+
+      for(const rain of rainOrder){
+        for(const wind of windOrder){
+          addCandidate({ ...backgroundInfo, rain, wind });
+        }
       }
-      else if(backgroundInfo.rain == "heavyRain"){
-        fallbackBackgroundInfo.rain = "rain";
+      for(const candidate of fallbackCandidates){
+        const candidateKey = this._getKeyFromBackgroundInfo(candidate);
+        if(this.sceneBackgroundFilenames[candidateKey]){
+          targetKey = candidateKey;
+          break;
+        }
       }
-      targetKey = this._getKeyFromBackgroundInfo(fallbackBackgroundInfo);
     }
     if(this.sceneBackgroundFilenames[targetKey]){
       let object = { background: { src: this.sceneBackgroundFilenames[targetKey] } };
@@ -1524,10 +1604,13 @@ class Merlin extends Hexcrawl{
     this.currentBackgroundInfo = backgroundInfo;
     this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
     this.sceneMerlinRain[canvas.scene.id] = backgroundInfo.rain;
+    this.sceneMerlinWind[canvas.scene.id] = backgroundInfo.wind;
     if(this.globalMerlinWeatherEnabled){
       this.globalMerlinTime = backgroundInfo.time;
       this.globalMerlinRain = backgroundInfo.rain;
+      this.globalMerlinWind = backgroundInfo.wind;
       game.settings.set("merlins-miscellany", "globalMerlinRain", this.globalMerlinRain);
+      game.settings.set("merlins-miscellany", "globalMerlinWind", this.globalMerlinWind);
       game.settings.set("merlins-miscellany", "globalMerlinTime", this.globalMerlinTime);
     }
     return bChangedBG;
@@ -1830,6 +1913,14 @@ Hooks.once("init", () => {
     type: String,
     default: ""
   });
+  game.settings.register("merlins-miscellany", "globalMerlinWind", {
+    name: "Global Merlin Wind String",
+    hint: "Current wind to use for all Merlin scenes.",
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
+  });
   game.settings.register("merlins-miscellany", "globalMerlinTime", {
     name: "Global Merlin Time String",
     hint: "Current time to use for all Merlin scenes.",
@@ -1840,6 +1931,7 @@ Hooks.once("init", () => {
   });
   game.merlin.globalMerlinWeatherEnabled = game.settings.get("merlins-miscellany", "globalMerlinWeatherEnabled");
   game.merlin.globalMerlinRain = game.settings.get("merlins-miscellany", "globalMerlinRain");
+  game.merlin.globalMerlinWind = game.settings.get("merlins-miscellany", "globalMerlinWind");
   game.merlin.globalMerlinTime = game.settings.get("merlins-miscellany", "globalMerlinTime");
 
   registerHexcrawlSettings(game);

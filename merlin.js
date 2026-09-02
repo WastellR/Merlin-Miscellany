@@ -1200,16 +1200,6 @@ class Merlin extends Hexcrawl{
     // Attempt to switch to it if we have a suitable background, else fall back to the current background
     this._updateBackground(desiredBackgroundInfo);
 
-    // De/activate night and rain sounds if any
-    for(let sound of canvas.scene.sounds){
-      if(sound.flags?.merlin?.nightSound){
-        sound.update({hidden: this.currentBackgroundInfo.time !== "night"});
-      }
-      if(sound.flags?.merlin?.rainSound){
-        sound.update({hidden: this.currentBackgroundInfo.rain == "none" || this.currentBackgroundInfo.rain == ""});
-      }
-    }
-
     if(hasAnimated && hasStatic){
       const videoButton = {
         name: "toggleMerlinVideo",
@@ -1526,6 +1516,19 @@ class Merlin extends Hexcrawl{
 
   async _updateBackground(backgroundInfo){
     if(JSON.stringify(backgroundInfo) === JSON.stringify(this.currentBackgroundInfo)) return false;
+
+    // De/activate night and rain sounds if any
+    for(let sound of canvas.scene.sounds){
+      if(sound.flags?.merlin?.nightSound){
+        sound.update({hidden: backgroundInfo.time !== "night"});
+      }
+      if(sound.flags?.merlin?.rainSound){
+        sound.update({hidden: backgroundInfo?.rain == "none" || backgroundInfo?.rain == ""});
+      }
+      if(sound.flags?.merlin?.windSound){
+        sound.update({hidden: backgroundInfo?.wind == "none" || backgroundInfo?.wind == ""});
+      }
+    }
 
     // Update rain overlay, fallback to other rain type if needed
     this.clearOverlays();

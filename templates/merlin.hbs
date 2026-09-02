@@ -45,6 +45,22 @@
                   placeholder="Enter JavaScript to run when this tile is triggered.">{{{source.flags.merlin.runCode}}}</textarea>
     </div>
 
+    <div class="form-group">
+        <label for="{{concat rootId "-" "merlin-stableId"}}">stableId</label>
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+            <input id="{{concat rootId "-" "merlin-stableId"}}"
+                   type="text"
+                   class="form-control"
+                   name="flags.merlin.stableId"
+                   value="{{source.flags.merlin.stableId}}" />
+            <button type="button"
+                    class="icon fa-solid fa-copy"
+                    data-merlin-copy-stable-id
+                    aria-label="Copy stable ID"
+                    data-tooltip="Copy stable ID"></button>
+        </div>
+    </div>
+
     <fieldset>
         <legend>Teleport</legend>
         <div class="form-group">

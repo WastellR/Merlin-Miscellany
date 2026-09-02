@@ -143,6 +143,16 @@ class Merlin extends Hexcrawl{
 
         async _processSubmitData(event, form, submitData, options = {}) {
           const merlinFlags = foundry.utils.getProperty(submitData, "flags.merlin") ?? {};
+          const stableId = String(merlinFlags.stableId ?? "").trim();
+          if (!stableId) {
+            ui.notifications.error("Merlin: Stable ID cannot be empty.");
+            throw new Error("Merlin stable ID cannot be empty.");
+          }
+          if (this._getUsedStableIds().has(stableId)) {
+            ui.notifications.error(`Merlin: The stable ID "${stableId}" is already used by another tile in this scene.`);
+            throw new Error(`Merlin stable ID "${stableId}" is already in use.`);
+          }
+
           // Store top-left tile coords
           const coords = game.merlin._getTileTopLeftCoords(options.x, options.y, options.width, options.height);
           merlinFlags.topLeftX = coords.x;
@@ -177,6 +187,7 @@ class Merlin extends Hexcrawl{
             relativeLocation: !!merlinFlags.relativeLocation,
             teleportIdentifier: merlinFlags.teleportIdentifier ?? "",
             teleportIdentifierPrev: merlinFlags.teleportIdentifierPrev ?? "",
+            stableId,
             isPOI: !!merlinFlags.isPOI,
             caption: merlinFlags.caption ?? "",
             captionFont: merlinFlags.captionFont ?? CONFIG.defaultFontFamily,
@@ -202,6 +213,7 @@ class Merlin extends Hexcrawl{
               relativeLocation: this.document.getFlag("merlin", "relativeLocation") ?? false,
               teleportIdentifier: this.document.getFlag("merlin", "teleportIdentifier") ?? "",
               teleportIdentifierPrev: this.document.getFlag("merlin", "teleportIdentifierPrev") ?? "",
+              stableId: this._getStableId(),
               isPOI: this.document.getFlag("merlin", "isPOI") ?? false,
               caption: this.document.getFlag("merlin", "caption") ?? "",
               captionFont: this.document.getFlag("merlin", "captionFont") ?? CONFIG.defaultFontFamily,
@@ -257,6 +269,24 @@ class Merlin extends Hexcrawl{
           return [...new Set(triggers.map(trigger => String(trigger).trim().toLowerCase()).filter(trigger => allowed.has(trigger)))];
         }
 
+        _getUsedStableIds() {
+          const tileId = this.document.id;
+          return new Set([...(this.document.parent?.tiles ?? [])]
+            .filter(tile => tile.id !== tileId)
+            .map(tile => String(tile?.flags?.merlin?.stableId ?? "").trim())
+            .filter(Boolean));
+        }
+
+        _getStableId() {
+          const currentId = String(this.document?.flags?.merlin?.stableId ?? "").trim();
+          if (currentId) return currentId;
+
+          const usedIds = this._getUsedStableIds();
+          let index = 0;
+          while (usedIds.has(`tile${String(index).padStart(4, "0")}`)) index += 1;
+          return `tile${String(index).padStart(4, "0")}`;
+        }
+
         /** @override */
         _attachPartListeners(partId, htmlElement, options) {
           super._attachPartListeners(partId, htmlElement, options);
@@ -265,6 +295,19 @@ class Merlin extends Hexcrawl{
           const select = htmlElement.querySelector("[data-merlin-trigger-select]");
           const list = htmlElement.querySelector("[data-merlin-trigger-list]");
           const hidden = htmlElement.querySelector('input[name="flags.merlin.triggers"]');
+          const stableIdInput = htmlElement.querySelector('input[name="flags.merlin.stableId"]');
+          const copyStableIdButton = htmlElement.querySelector("[data-merlin-copy-stable-id]");
+
+          copyStableIdButton?.addEventListener("click", async () => {
+            try {
+              await navigator.clipboard.writeText(stableIdInput?.value ?? "");
+              ui.notifications.info("Merlin: Stable ID copied to the clipboard.");
+            } catch (error) {
+              console.error("Merlin | Failed to copy stable ID", error);
+              ui.notifications.error("Merlin: Could not copy the stable ID to the clipboard.");
+            }
+          });
+
           if (!select || !list || !hidden) return;
 
           const renderTriggerList = () => {
@@ -324,6 +367,7 @@ class Merlin extends Hexcrawl{
     this.teleportTileIds = {};
     this.builtTeleportTileScenes = new Set();
     for(let scene of game.scenes){
+      await this._ensureSceneStableIds(scene);
       this._buildTeleportTileIdsMap(scene);
 
       // Also check all tiles are in the correct position due to  v13 -> v14 position fuckery
@@ -373,8 +417,34 @@ class Merlin extends Hexcrawl{
 
   }
 
+  async _ensureSceneStableIds(scene) {
+    if (!game.user.isGM || !scene) return;
+
+    const usedIds = new Set();
+    const tilesWithoutStableIds = [];
+    for (const tile of scene.tiles) {
+      const stableId = String(tile?.flags?.merlin?.stableId ?? "").trim();
+      if (stableId) usedIds.add(stableId);
+      else tilesWithoutStableIds.push(tile);
+    }
+
+    const updates = tilesWithoutStableIds.map(tile => {
+      let index = 0;
+      let stableId;
+      do {
+        stableId = `tile${String(index).padStart(4, "0")}`;
+        index += 1;
+      } while (usedIds.has(stableId));
+      usedIds.add(stableId);
+      return { _id: tile.id, "flags.merlin.stableId": stableId };
+    });
+
+    if (updates.length) await scene.updateEmbeddedDocuments("Tile", updates);
+  }
+
   async _onCanvasReady(canvas) {
     console.log("Merlin | Canvas Ready");
+    await this._ensureSceneStableIds(canvas.scene);
     this.overlays = [];
     this.tileCaption = null;
     this._hideTileCaption();
@@ -754,6 +824,7 @@ class Merlin extends Hexcrawl{
     // Toggle tiles if specified
     const tileIds = doc.flags.merlin.switchTiles;
     if (tileIds) {
+      const sceneTiles = doc.parent?.tiles ?? canvas.scene?.tiles;
       const ids = tileIds.split(",").map(s => s.trim()).filter(Boolean);
       for (let id of ids) {
         let inverted = false;
@@ -761,9 +832,10 @@ class Merlin extends Hexcrawl{
           inverted = true;
           id = id.slice(1);
         }
-        const tile = canvas.tiles.get(id);
+        const tile = sceneTiles?.get(id) ?? [...(sceneTiles ?? [])].find(tile =>
+          String(tile?.flags?.merlin?.stableId ?? "").trim() === id);
         if (tile) {
-          await tile.document.update({ alpha: (doc.hidden == inverted ? 1 : 0), hidden: false });
+          await tile.update({ alpha: (doc.hidden == inverted ? 1 : 0), hidden: false });
         }
       }
     }
@@ -965,10 +1037,12 @@ class Merlin extends Hexcrawl{
   async _getSceneControlButtons(controls){
     console.log("Merlin | Adding scene control buttons", controls);
     let bContainsPoiButton = false;
-    for (const tile of canvas?.scene?.tiles) {
-      if (tile?.flags?.merlin?.isPOI === true) {
-          bContainsPoiButton = true;
-          break;
+    if(canvas?.scene?.tiles){
+      for (const tile of canvas?.scene?.tiles) {
+        if (tile?.flags?.merlin?.isPOI === true) {
+            bContainsPoiButton = true;
+            break;
+        }
       }
     }
     if(bContainsPoiButton){
@@ -1266,8 +1340,6 @@ class Merlin extends Hexcrawl{
           const next = states[(currentIndex + 1) % states.length];
           let desiredBackgroundInfo = {...this.currentBackgroundInfo};
           desiredBackgroundInfo.rain = next;
-          console.log(states, current);
-          console.log("Merlin | Switching rain to: " + next);
           this._updateBackground(desiredBackgroundInfo);
         }
       };

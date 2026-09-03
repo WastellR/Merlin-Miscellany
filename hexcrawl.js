@@ -414,7 +414,14 @@ export class Hexcrawl {
     desiredBackgroundInfo.time = this.hexcrawlTime === 2 ? "night" : "day";
     const weatherCode = this.hexcrawlWeatherLog.at(this._getHexcrawlPeriodsLength() - 1);
     const [temperature, wind, precipitation, special] = weatherCode.split("");
-    desiredBackgroundInfo.weather = precipitation === "a" ? "none" : "rain";
+    
+    desiredBackgroundInfo.rain = "none";
+    if(precipitation == "b") desiredBackgroundInfo.rain = "rain";
+    else if(precipitation == "c") desiredBackgroundInfo.rain = "heavyRain";
+    desiredBackgroundInfo.wind = "none";
+    if(wind == "b") desiredBackgroundInfo.wind = "wind";
+    else if(wind == "c") desiredBackgroundInfo.wind = "highWind";
+
     if(this._updateBackground(desiredBackgroundInfo)){
       this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;
       if(this.globalMerlinWeatherEnabled){

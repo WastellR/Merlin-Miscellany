@@ -74,6 +74,7 @@ class Merlin extends Hexcrawl{
     super();
     Hooks.on("ready", this._onReady.bind(this));
     Hooks.on("canvasReady", this._onCanvasReady.bind(this));
+    Hooks.on("renderSceneNavigation", this._onRenderSceneNavigation.bind(this));
     Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
     Hooks.on("controlToken", this._onControlToken.bind(this));
     Hooks.on("updateToken", this._onUpdateToken.bind(this));
@@ -417,31 +418,6 @@ class Merlin extends Hexcrawl{
 
   }
 
-  async _ensureSceneStableIds(scene) {
-    if (!game.user.isGM || !scene) return;
-
-    const usedIds = new Set();
-    const tilesWithoutStableIds = [];
-    for (const tile of scene.tiles) {
-      const stableId = String(tile?.flags?.merlin?.stableId ?? "").trim();
-      if (stableId) usedIds.add(stableId);
-      else tilesWithoutStableIds.push(tile);
-    }
-
-    const updates = tilesWithoutStableIds.map(tile => {
-      let index = 0;
-      let stableId;
-      do {
-        stableId = `tile${String(index).padStart(4, "0")}`;
-        index += 1;
-      } while (usedIds.has(stableId));
-      usedIds.add(stableId);
-      return { _id: tile.id, "flags.merlin.stableId": stableId };
-    });
-
-    if (updates.length) await scene.updateEmbeddedDocuments("Tile", updates);
-  }
-
   async _onCanvasReady(canvas) {
     console.log("Merlin | Canvas Ready");
     await this._ensureSceneStableIds(canvas.scene);
@@ -526,6 +502,68 @@ class Merlin extends Hexcrawl{
     } finally {
       this._regenInProgress = false;
     }
+  }
+
+
+  async _onRenderSceneNavigation(app, html) {
+    const parentSceneId = canvas.scene?.flags?.merlin?.parentSceneId;
+    if(!parentSceneId) return;
+
+    // html?.insertAdjacentHTML("afterbegin", `<a class="ui-control">
+    //   <a href="#" data-scene-id="${parentSceneId}">Return to Parent Scene</a>
+    // </a>`);
+
+    const button = document.createElement("a");
+    button.id = "parent-scene-button";
+    button.classList.add("ui-control");
+    button.innerHTML = `<i class="fa-solid fa-map"></i>`;
+    button.setAttribute("data-tooltip", "Parent Scene");
+    button.setAttribute("aria-label", "Parent Scene");
+    button.addEventListener("click", () => {
+      
+      let parentScene = game.scenes.get(parentSceneId);
+      console.log('parent scene', parentScene, parentSceneId)
+      if(!parentScene){
+        for (const scene of game.scenes) {
+          if(scene?.flags?.merlin?.stableId == parentSceneId) {
+            console.log('found', scene.flags.merlin.stableId);
+            parentScene = scene;
+            break;
+          }
+        }
+      }
+      console.log('ssdf',parentScene);
+      if(parentScene){
+        parentScene.view();
+      }
+    });
+    
+    html.appendChild(button);
+  }
+
+  async _ensureSceneStableIds(scene) {
+    if (!game.user.isGM || !scene) return;
+
+    const usedIds = new Set();
+    const tilesWithoutStableIds = [];
+    for (const tile of scene.tiles) {
+      const stableId = String(tile?.flags?.merlin?.stableId ?? "").trim();
+      if (stableId) usedIds.add(stableId);
+      else tilesWithoutStableIds.push(tile);
+    }
+
+    const updates = tilesWithoutStableIds.map(tile => {
+      let index = 0;
+      let stableId;
+      do {
+        stableId = `tile${String(index).padStart(4, "0")}`;
+        index += 1;
+      } while (usedIds.has(stableId));
+      usedIds.add(stableId);
+      return { _id: tile.id, "flags.merlin.stableId": stableId };
+    });
+
+    if (updates.length) await scene.updateEmbeddedDocuments("Tile", updates);
   }
 
   _buildTeleportTileIdsMap(){

@@ -19,6 +19,10 @@
   "esmodules": [
     "merlin.js"
   ],
+  "styles": [
+    "styles/merlin.css",
+    "styles/hexcrawl.css"
+  ],
   "flags": {
     "canUpload": true
   },

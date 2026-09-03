@@ -1,0 +1,11 @@
+#parent-scene-button {
+    position: absolute;
+    top: 4px;
+    right: -28px;
+    width: 24px;
+    height: 24px;
+    font-size: var(--font-size-12);
+    text-align: center;
+    line-height: 24px;
+    pointer-events: all;
+}

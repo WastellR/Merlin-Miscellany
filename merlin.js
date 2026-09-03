@@ -74,6 +74,7 @@ class Merlin extends Hexcrawl{
     super();
     Hooks.on("ready", this._onReady.bind(this));
     Hooks.on("canvasReady", this._onCanvasReady.bind(this));
+    Hooks.on("canvasPan", this._onCanvasPan.bind(this));
     Hooks.on("renderSceneNavigation", this._onRenderSceneNavigation.bind(this));
     Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
     Hooks.on("controlToken", this._onControlToken.bind(this));
@@ -106,6 +107,8 @@ class Merlin extends Hexcrawl{
   tileCaptionFontSize = 18;
   tileCaptionBoardListenersBound = false;
   bShowingTileCaption = false;
+
+  prevPanPosition = {x: 0, y: 0, scale: 0};
   
   // The scene control (left-side control buttons) that was previously active
   prevActiveControl = "";
@@ -425,6 +428,7 @@ class Merlin extends Hexcrawl{
     this.tileCaption = null;
     this._hideTileCaption();
     this._bindTileCaptionListeners();
+    this.prevPanPosition.scale = 0;
     setTimeout(() => {
       this._updatePOITilesVisibility();
     }, 100);
@@ -503,15 +507,32 @@ class Merlin extends Hexcrawl{
       this._regenInProgress = false;
     }
   }
+  
+  overworldZoomOutThreshold = 0.65;
 
+  _onCanvasPan(canvas, position) {    
+    if(!canvas.ready) return;
+    // Only trigger on zoom changes, not panning
+    if(position.x != this.prevPanPosition?.x || position.y != this.prevPanPosition?.y){
+      this.prevPanPosition = position;
+      return;
+    }
+   
+    if(canvas?.scene?.flags?.merlin?.parentSceneId){
+      if(position.scale <= this.overworldZoomOutThreshold
+        && this.prevPanPosition.scale == position.scale){
+        this._viewParentScene();
+      }
+    }
+
+    Hooks.callAll("merlinCanvasPan", position, this.prevPanPosition);
+
+    this.prevPanPosition = position;
+  }
 
   async _onRenderSceneNavigation(app, html) {
     const parentSceneId = canvas.scene?.flags?.merlin?.parentSceneId;
     if(!parentSceneId) return;
-
-    // html?.insertAdjacentHTML("afterbegin", `<a class="ui-control">
-    //   <a href="#" data-scene-id="${parentSceneId}">Return to Parent Scene</a>
-    // </a>`);
 
     const button = document.createElement("a");
     button.id = "parent-scene-button";
@@ -520,25 +541,36 @@ class Merlin extends Hexcrawl{
     button.setAttribute("data-tooltip", "Parent Scene");
     button.setAttribute("aria-label", "Parent Scene");
     button.addEventListener("click", () => {
-      
-      let parentScene = game.scenes.get(parentSceneId);
-      console.log('parent scene', parentScene, parentSceneId)
-      if(!parentScene){
-        for (const scene of game.scenes) {
-          if(scene?.flags?.merlin?.stableId == parentSceneId) {
-            console.log('found', scene.flags.merlin.stableId);
-            parentScene = scene;
-            break;
-          }
-        }
-      }
-      console.log('ssdf',parentScene);
-      if(parentScene){
-        parentScene.view();
-      }
+      this._viewParentScene();      
     });
     
     html.appendChild(button);
+  }
+
+  async _viewParentScene(){
+    const parentSceneId = canvas.scene?.flags?.merlin?.parentSceneId;
+    const parentSceneView = canvas.scene?.flags?.merlin?.parentSceneView;
+    
+    if(!parentSceneId) return;
+    let parentScene = game.scenes.get(parentSceneId);
+    if(!parentScene){
+      for (const scene of game.scenes) {
+        if(scene?.flags?.merlin?.stableId == parentSceneId) {
+          parentScene = scene;
+          break;
+        }
+      }
+    }
+    if(parentScene){
+      await parentScene.view();
+      if(parentSceneView){
+        await canvas.animatePan({
+          x: parentSceneView.x,
+          y: parentSceneView.y,
+          scale: parentSceneView.scale
+        });
+      }
+    }
   }
 
   async _ensureSceneStableIds(scene) {

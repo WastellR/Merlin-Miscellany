@@ -1660,7 +1660,18 @@ export function registerHexcrawlSettings(game) {
       standard: "Standard",
       jungle: "Jungle",
       frigid: "Frigid"
+    },
+    onChange: (value) => {
+      game.settings.set("merlins-miscellany", "hexcrawlEverChangedClimate", true);
     }
+  });
+  game.settings.register("merlins-miscellany", "hexcrawlEverChangedClimate", {
+    name: "Ever Changed Climate",
+    hint: "Has the default climate ever been changed manually by the user",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false
   });
   game.settings.register("merlins-miscellany", "hexcrawlDays", {
     name: "Hexcrawl Days",

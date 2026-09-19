@@ -598,6 +598,15 @@ class Merlin extends Hexcrawl{
     if (updates.length) await scene.updateEmbeddedDocuments("Tile", updates);
   }
 
+  /** Return the active scene's TileDocument with the supplied Merlin stable ID. */
+  getTile(stableId) {
+    const id = String(stableId ?? "").trim();
+    if (!id) return null;
+
+    return [...(canvas.scene?.tiles ?? [])].find(tile =>
+      String(tile?.flags?.merlin?.stableId ?? "").trim() === id) ?? null;
+  }
+
   _buildTeleportTileIdsMap(){
     for(let scene of game.scenes){
       if(this.builtTeleportTileScenes.has(scene.id)) continue;

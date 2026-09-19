@@ -2067,7 +2067,11 @@ class Merlin extends Hexcrawl{
     for(const overlay of this.overlays){
       if(overlay){
         canvas.interface.removeChild(overlay);
-        overlay.destroy();
+        overlay.destroy({
+          children: true,
+          texture: true,
+          baseTexture: true
+        });
       }
     }
     this.overlays = [];

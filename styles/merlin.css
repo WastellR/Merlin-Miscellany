@@ -9,3 +9,7 @@
     line-height: 24px;
     pointer-events: all;
 }
+
+.merlin-wall-run-code {
+    margin-top: 0.5rem;
+}

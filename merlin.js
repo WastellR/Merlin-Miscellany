@@ -77,6 +77,8 @@ class Merlin extends Hexcrawl{
     Hooks.on("canvasPan", this._onCanvasPan.bind(this));
     Hooks.on("renderSceneNavigation", this._onRenderSceneNavigation.bind(this));
     Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
+    Hooks.on("updateWall", this._onUpdateWall.bind(this));
+    Hooks.on("renderWallConfig", this._onRenderWallConfig.bind(this));
     Hooks.on("controlToken", this._onControlToken.bind(this));
     Hooks.on("updateToken", this._onUpdateToken.bind(this));
     Hooks.on("getSceneControlButtons", this._getSceneControlButtons.bind(this));
@@ -887,21 +889,32 @@ class Merlin extends Hexcrawl{
     const state = doc.hidden ? "OFF" : "ON";
     console.log(`Merlin | Light [${doc.id}] toggled ${state}`);
 
+    await this._runToggleActions(doc, !doc.hidden, "light");
+  }
+
+  /**
+   * Run the common Merlin actions for a light or a door. `isActive` means the
+   * light is on or the door is open, respectively.
+   */
+  async _runToggleActions(doc, isActive, documentType) {
+
     // Run custom code if provided
-    const code = doc.flags.merlin.runCode;
+    const code = doc.flags?.merlin?.runCode;
     if (code) {
       try {
-        console.log(`Merlin | Running code for light ${doc.id}`);
+        console.log(`Merlin | Running code for ${documentType} ${doc.id}`);
+        // Snippets receive `state`: true for a light on / door open, false
+        // for a light off / door closed.
         // eslint-disable-next-line no-eval
-        eval(code);
+        ((state) => eval(code))(isActive);
       } catch (err) {
         console.error("Merlin | Error in runCode:", err);
-        ui.notifications.error(`Merlin: Error in runCode for light ${doc.id}`);
+        ui.notifications.error(`Merlin: Error in runCode for ${documentType} ${doc.id}`);
       }
     }
 
     // Toggle tiles if specified
-    const tileIds = doc.flags.merlin.switchTiles;
+    const tileIds = doc.flags?.merlin?.switchTiles;
     if (tileIds) {
       const sceneTiles = doc.parent?.tiles ?? canvas.scene?.tiles;
       const ids = tileIds.split(",").map(s => s.trim()).filter(Boolean);
@@ -914,10 +927,49 @@ class Merlin extends Hexcrawl{
         const tile = sceneTiles?.get(id) ?? [...(sceneTiles ?? [])].find(tile =>
           String(tile?.flags?.merlin?.stableId ?? "").trim() === id);
         if (tile) {
-          await tile.update({ alpha: (doc.hidden == inverted ? 1 : 0), hidden: false });
+          // Normal IDs are visible when the light is on / door is open;
+          // a leading '-' reverses that relationship.
+          await tile.update({ alpha: (isActive == inverted ? 0 : 1), hidden: false });
         }
       }
     }
+  }
+
+  // Watch doors for an open/closed state change. `ds` is Foundry's persisted
+  // wall-door state (0 = closed, 1 = open).
+  async _onUpdateWall(doc, changes, options, userId) {
+    if (!("ds" in changes)) return;
+
+    const isOpen = doc.ds === CONST.WALL_DOOR_STATES.OPEN;
+    console.log(`Merlin | Door [${doc.id}] ${isOpen ? "opened" : "closed"}`);
+    await this._runToggleActions(doc, isOpen, "door");
+  }
+
+  // WallConfig has no Advanced tab to replace like AmbientLightConfig does, so
+  // add the same two native form controls to its standard form at render time.
+  _onRenderWallConfig(app, html) {
+    const root = html instanceof HTMLElement ? html : html?.[0];
+    const form = root?.matches("form") ? root : root?.querySelector("form");
+    if (!form || form.querySelector('[name="flags.merlin.switchTiles"]')) return;
+
+    const merlinFlags = app.document?.flags?.merlin ?? {};
+    const fields = document.createElement("div");
+    fields.classList.add("merlin-wall-toggle-fields");
+    fields.innerHTML = `
+      <div class="form-group">
+        <label>Switch Tiles</label>
+        <textarea name="flags.merlin.switchTiles" class="form-control lw-switchTiles-textarea" rows="1" placeholder="Enter tile IDs or stableIds to show/hide when this door opens/closes."></textarea>
+      </div>
+      <div class="form-group merlin-wall-run-code">
+        <label>Run Code (on open/close)</label>
+        <textarea name="flags.merlin.runCode" class="form-control lw-runcode-textarea" rows="6" placeholder="Enter JavaScript to run when this door opens or closes."></textarea>
+      </div>`;
+    fields.querySelector('[name="flags.merlin.switchTiles"]').value = merlinFlags.switchTiles ?? "";
+    fields.querySelector('[name="flags.merlin.runCode"]').value = merlinFlags.runCode ?? "";
+
+    const footer = form.querySelector(".form-footer, footer");
+    if (footer) footer.before(fields);
+    else form.append(fields);
   }
 
   _bindMerlinDocumentClickListener() {

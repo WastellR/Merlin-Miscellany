@@ -30,7 +30,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #ddd;
+    color: #ddddddaa;
     font-size: 18px;
     cursor: pointer;
     pointer-events: all;
@@ -53,12 +53,11 @@
     display: none;
     flex-direction: column;
     gap: 2px;
-    min-width: 140px;
     max-width: 260px;
     padding: 4px 8px;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.6);
-    color: #ddd;
+    color: #ddddddaa;
     font-family: "Signika", sans-serif;
     font-size: 16px;
     pointer-events: all;

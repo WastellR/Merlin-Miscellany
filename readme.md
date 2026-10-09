@@ -8,3 +8,7 @@
 - Add a custom 'point of interest' tile with a toggle control
 - Add two custom fields to lights that runs code or shows/hides a tile when the light is switched
 - Automatically regenerate missing thumbnails on scene load (this is a problem when loading scenes from compendium adventures)
+
+## Third-party software
+
+Merlin's live video stream support bundles Epic Games' Pixel Streaming frontend library (MIT) and its dependencies (MIT, Apache-2.0, BSD-3-Clause) in `lib/pixelstreamingfrontend.js`. Their license texts are in `lib/THIRD_PARTY_LICENSES.txt`.

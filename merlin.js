@@ -84,6 +84,8 @@ class Merlin extends Hexcrawl{
     Hooks.on("getSceneControlButtons", this._getSceneControlButtons.bind(this));
     Hooks.on("updateTile", this._onUpdateTile.bind(this));
     Hooks.on("hoverTile", this._onHoverTile.bind(this));
+    Hooks.on("renderSettings", this._onRenderSettings.bind(this));
+    Hooks.on("renderPlayers", () => this._positionMerlinStatusWidget());
 
     // Register fonts
     CONFIG.fontDefinitions["Jubilee Medium"] = {
@@ -114,8 +116,467 @@ class Merlin extends Hexcrawl{
   
   // The scene control (left-side control buttons) that was previously active
   prevActiveControl = "";
+  // Status of the local Merlin instance: null if it isn't running, else "disconnected" | "waiting" | "linked".
+  merlinStatus = null;
+  // The last status response from Merlin, including its download/level progress. Null if Merlin isn't running.
+  merlinInfo = null;
+  // True from the GM pressing "Connect to Merlin" until they press "Disconnect Merlin" (or Merlin ends the link).
+  // While enabled we look for Merlin, link to it as soon as it's found, then stop polling once linked.
+  merlinEnabled = false;
+  _merlinPollTimer = null;
+  // True once we've asked Merlin to link (or found it waiting for the user), so that a drop back to
+  // "disconnected" means the user declined
+  _merlinLinkRequested = false;
+  _merlinStatusCollapsed = localStorage.getItem("merlin.statusCollapsed") !== "false";
+  _merlinStatusObserver = null;
+  // The PixelStreaming connection to Merlin, if any: { url, streamerId, ps, parent, video, texture }
+  merlinStream = null;
+  // The scene's original background texture, while it's replaced by Merlin's stream
+  _originalBackground = null;
+
+  get _merlinUrl() {
+    const port = game.settings.get("merlins-miscellany", "merlinServerPort");
+    return `http://127.0.0.1:${port}`;
+  }
+
+  // Returns Merlin's link status, or null if it can't be reached
+  async _fetchMerlinStatus() {
+    try {
+      const response = await fetch(`${this._merlinUrl}/ping`, { signal: AbortSignal.timeout(1500) });
+      if (!response.ok) return null;
+      return this._readMerlinResponse(await response.json());
+    } catch (err) {
+      return null;
+    }
+  }
+
+  _setMerlinStatus(status) {
+    if (status === this.merlinStatus) return;
+    this.merlinStatus = status;
+    console.log(`Merlin | Merlin status: ${status ?? "not running"}`);
+  }
+
+  // The merlin.merlinPackageId / merlin.merlinLevelId flags identify which Merlin package and level a scene corresponds to.
+  // merlin.merlinCameraId is the name of the camera in that level which Merlin should render.
+  _getMerlinSceneData() {
+    const packages = new Set();
+    for (const scene of game.scenes) {
+      const packageId = scene.flags?.merlin?.merlinPackageId ?? "";
+      if (packageId) packages.add(packageId);
+    }
+    return {
+      packages: [...packages],
+      packageId: canvas.scene?.flags?.merlin?.merlinPackageId ?? "",
+      levelId: canvas.scene?.flags?.merlin?.merlinLevelId ?? "",
+      cameraId: canvas.scene?.flags?.merlin?.merlinCameraId ?? ""
+    };
+  }
+
+  // text/plain keeps these CORS "simple requests" (no preflight); Merlin parses the body as JSON regardless.
+  async _postToMerlin(path) {
+    console.log('body', JSON.stringify(this._getMerlinSceneData()));
+    const response = await fetch(`${this._merlinUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify(this._getMerlinSceneData()),
+      signal: AbortSignal.timeout(5000)
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return this._readMerlinResponse(await response.json());
+  }
+
+  // Reads Merlin's status response, which also tells us where to find its video stream. Returns the link status.
+  _readMerlinResponse(json) {
+    const status = json?.status ?? null;
+    this.merlinInfo = json;
+    const linked = status === "linked" && json.streamUrl;
+    this._updateMerlinStream(linked ? json.streamUrl : null, json.streamerId);
+    return status;
+  }
+
+  // Merlin streams its camera view via PixelStreaming; we show it as the current scene's background.
+  async _updateMerlinStream(url, streamerId) {
+    if (!url) return this._stopMerlinStream();
+    if (this.merlinStream?.url === url && this.merlinStream?.streamerId === streamerId) return;
+    this._stopMerlinStream();
+
+    // Claim the slot synchronously so concurrent responses don't start a second stream
+    const stream = this.merlinStream = { url, streamerId, ps: null, parent: null, video: null, texture: null };
+    try {
+      const { Config, PixelStreaming, Logger, LogLevel } = await import("./lib/pixelstreamingfrontend.js");
+      // The library logs every data channel message at Info level, with a stack trace each time
+      Logger.InitLogging(LogLevel.Warning, false);
+      if (this.merlinStream !== stream) return;
+
+      // Kept in the DOM and technically rendered (browsers may stop delivering frames for display:none or
+      // fully transparent video), but 2px, almost transparent and behind everything. The video is only a source
+      // for the scene background texture; its on-screen size doesn't affect the texture.
+      stream.parent = document.createElement("div");
+      stream.parent.style.cssText = "position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0.01;z-index:-1;pointer-events:none;";
+      // Not a child of <body>: Foundry lays body out as a flex row alongside #interface, so a stray child could squash it
+      document.documentElement.appendChild(stream.parent);
+
+      const config = new Config({
+        useUrlParams: false,
+        initialSettings: {
+          ss: url,
+          StreamerId: streamerId,
+          AutoConnect: true,
+          AutoPlayVideo: true,
+          StartVideoMuted: true,
+          WaitForStreamer: true,
+          // Merlin's signalling server never answers the frontend's keepalive pings, which would make the frontend
+          // drop the connection as timed out every minute. It's a localhost connection, so it doesn't need one.
+          KeepaliveDelay: 0,
+          MaxReconnectAttempts: 100
+        }
+      });
+      stream.ps = new PixelStreaming(config, { videoElementParent: stream.parent });
+
+      // Whatever the library creates, make sure no video it owns ends up visible in Foundry's UI
+      stream.observer = new MutationObserver(() => this._parkMerlinStreamVideo(stream));
+      stream.observer.observe(document.documentElement, { childList: true, subtree: true });
+      stream.ps.addEventListener("videoInitialized", () => {
+        this._parkMerlinStreamVideo(stream);
+        console.log("Merlin | Merlin video stream connected");
+        this._applyMerlinStreamBackground();
+      });
+      stream.ps.addEventListener("webRtcDisconnected", () => {
+        this._restoreSceneBackground();
+        // The stream dropping is how we find out Merlin has closed, as we no longer poll once linked
+        if (this.merlinStream === stream) this._checkMerlinAfterStreamLoss();
+      });
+    } catch (err) {
+      console.error("Merlin | Failed to start Merlin video stream:", err);
+      if (this.merlinStream === stream) this._stopMerlinStream();
+    }
+  }
+
+  // Moves the library's video element into our off-screen holder and finds it for use as a texture source
+  _parkMerlinStreamVideo(stream) {
+    for (const video of document.querySelectorAll("video#streamingVideo")) {
+      if (video.parentElement !== stream.parent) {
+        console.log("Merlin | Moving stream video out of", video.parentElement);
+        stream.parent.appendChild(video);
+      }
+      for (const [prop, value] of Object.entries({ position: "absolute", left: "0", top: "0", width: "2px", height: "2px", "pointer-events": "none" })) {
+        video.style.setProperty(prop, value, "important");
+      }
+      video.muted = true;
+      video.playsInline = true;
+      stream.video = video;
+    }
+  }
+
+  _stopMerlinStream() {
+    const stream = this.merlinStream;
+    if (!stream) return;
+    this.merlinStream = null;
+    stream.observer?.disconnect();
+    this._restoreSceneBackground();
+    try { stream.ps?.disconnect(); } catch (err) { console.warn("Merlin | Error closing Merlin video stream:", err); }
+    stream.texture?.destroy?.(false);
+    stream.parent?.remove();
+  }
+
+  // The mesh showing the current scene's (or level's) background image
+  get _sceneBackgroundMesh() {
+    return canvas.primary?.background ?? null;
+  }
+
+  // Replaces the current scene's background with Merlin's video stream
+  _applyMerlinStreamBackground() {
+    const stream = this.merlinStream;
+    const mesh = this._sceneBackgroundMesh;
+    if (!stream?.video || !mesh || mesh.destroyed) return;
+
+    // Scenes with no Merlin package/level keep their own background; the connection stays open for other scenes
+    const merlinFlags = canvas.scene?.flags?.merlin;
+    if (!merlinFlags?.merlinPackageId && !merlinFlags?.merlinLevelId) {
+      this._restoreSceneBackground();
+      return;
+    }
+    const video = stream.video;
+
+    // A SpriteMesh's size is derived from its texture's size, which is zero until the video's metadata arrives
+    if (!video.videoWidth || !video.videoHeight) {
+      if (!stream.waitingForMetadata) {
+        stream.waitingForMetadata = true;
+        video.addEventListener("loadedmetadata", () => {
+          stream.waitingForMetadata = false;
+          if (this.merlinStream === stream) this._applyMerlinStreamBackground();
+        }, { once: true });
+      }
+      return;
+    }
+
+    if (!stream.texture) {
+      // load() hooks up the play/pause listeners that keep the texture updating with each new video frame
+      // (autoLoad must stay enabled, or the texture would stay on the first frame). We start playback ourselves.
+      const resource = new PIXI.VideoResource(video, { autoPlay: false });
+      stream.texture = new PIXI.Texture(new PIXI.BaseTexture(resource));
+      // Re-fit if the stream's resolution changes (e.g. the Merlin window is resized); the resource resizes itself
+      video.addEventListener("resize", () => {
+        if (this.merlinStream === stream) this._fitSceneBackgroundMesh(this._sceneBackgroundMesh);
+      });
+    }
+    if (!this._originalBackground || this._originalBackground.mesh !== mesh) {
+      this._originalBackground = { mesh, texture: mesh.texture, visible: mesh.visible };
+    }
+
+    mesh.texture = stream.texture;
+    mesh.visible = true;
+    this._fitSceneBackgroundMesh(mesh);
+    video.play?.().catch(() => {});
+  }
+
+  // Positions and sizes the mesh to cover the scene rectangle, as Foundry does for the background image
+  _fitSceneBackgroundMesh(mesh) {
+    if (!mesh || mesh.destroyed) return;
+    const d = canvas.dimensions;
+    mesh.position.set(d.sceneX, d.sceneY);
+    mesh.width = d.sceneWidth;
+    mesh.height = d.sceneHeight;
+  }
+
+  _restoreSceneBackground() {
+    const original = this._originalBackground;
+    this._originalBackground = null;
+    if (!original || original.mesh.destroyed) return;
+    original.mesh.texture = original.texture;
+    original.mesh.visible = original.visible;
+    this._fitSceneBackgroundMesh(original.mesh);
+  }
+
+  // Tell Merlin about the new scene whenever the scene changes
+  async _sendMerlinSceneUpdate() {
+    if (this.merlinStatus !== "linked") return;
+    try {
+      this._handleMerlinStatus(await this._postToMerlin("/scene"));
+    } catch (err) {
+      console.error("Merlin | Failed to send scene to Merlin:", err);
+      this._handleMerlinStatus(await this._fetchMerlinStatus());
+    }
+  }
+
+  // Starts looking for Merlin, and links to it as soon as it's found
+  _connectToMerlin() {
+    if (!game.user.isGM || this.merlinEnabled) return;
+    this.merlinEnabled = true;
+    sessionStorage.setItem("merlin.connect", "true");
+    this._merlinLinkRequested = false;
+    this._updateMerlinUI();
+    this._pollMerlin();
+  }
+
+  // Stops polling and drops the link. If unlink is set, also tells Merlin to end puppet mode.
+  _disconnectFromMerlin(unlink = false) {
+    if (unlink && this.merlinStatus !== null) this._postUnlinkToMerlin();
+    this.merlinEnabled = false;
+    sessionStorage.removeItem("merlin.connect");
+    this._merlinLinkRequested = false;
+    clearTimeout(this._merlinPollTimer);
+    this._merlinPollTimer = null;
+    this._stopMerlinStream();
+    this.merlinInfo = null;
+    this._setMerlinStatus(null);
+    this._updateMerlinUI();
+  }
+
+  _postUnlinkToMerlin() {
+    fetch(`${this._merlinUrl}/unlink`, { method: "POST", headers: { "Content-Type": "text/plain" }, body: "{}" })
+      .catch(() => {});
+  }
+
+  _scheduleMerlinPoll(delay) {
+    clearTimeout(this._merlinPollTimer);
+    this._merlinPollTimer = this.merlinEnabled ? setTimeout(() => this._pollMerlin(), delay) : null;
+  }
+
+  async _pollMerlin() {
+    this._merlinPollTimer = null;
+    const status = await this._fetchMerlinStatus();
+    if (!this.merlinEnabled) return;
+    this._handleMerlinStatus(status);
+    // Merlin was already linked (e.g. after a Foundry refresh); make sure it has the current scene
+    if (status === "linked") this._sendMerlinSceneUpdate();
+  }
+
+  // Reacts to Merlin's status, whichever request it came from. Polling only continues while we're searching for
+  // Merlin, waiting for its user to confirm, or while it's downloading/loading; once linked and idle it stops.
+  _handleMerlinStatus(status) {
+    if (!this.merlinEnabled) return;
+    const previous = this.merlinStatus;
+    if (status === null) {
+      this.merlinInfo = null;
+      this._stopMerlinStream();
+    }
+    this._setMerlinStatus(status);
+    this._updateMerlinUI();
+
+    if (status === null) {
+      // Not found (or lost); keep looking
+      this._merlinLinkRequested = false;
+      this._scheduleMerlinPoll(5000);
+      return;
+    }
+
+    if (status === "disconnected") {
+      if (previous === "linked" || this._merlinLinkRequested) {
+        // Merlin ended the link, or its user declined it. Don't badger them with another prompt.
+        ui.notifications.warn(previous === "linked" ? "Merlin disconnected." : "Merlin: link was declined.");
+        this._disconnectFromMerlin();
+      } else {
+        this._requestMerlinLink();
+      }
+    } else if (status === "waiting") {
+      // Merlin is asking its user to confirm
+      if (!this._merlinLinkRequested) ui.notifications.info("Waiting for Merlin user to confirm...");
+      this._merlinLinkRequested = true;
+      this._scheduleMerlinPoll(1000);
+    } else if (status === "linked") {
+      if (previous !== "linked") ui.notifications.info("Linked to Merlin.");
+      this._merlinLinkRequested = false;
+      const info = this.merlinInfo;
+      const busy = info?.downloadingPackages?.length || info?.loadingLevel;
+      if (busy) this._scheduleMerlinPoll(1000);
+    }
+  }
+
+  async _requestMerlinLink() {
+    this._merlinLinkRequested = true;
+    try {
+      this._handleMerlinStatus(await this._postToMerlin("/link"));
+    } catch (err) {
+      console.error("Merlin | Failed to link to Merlin:", err);
+      this._handleMerlinStatus(await this._fetchMerlinStatus());
+    }
+  }
+
+  // The video stream dropped: either Merlin closed, or the connection blipped. Ask Merlin once to find out which.
+  async _checkMerlinAfterStreamLoss() {
+    if (!this.merlinEnabled || this.merlinStatus !== "linked") return;
+    const status = await this._fetchMerlinStatus();
+    if (status !== "linked") this._handleMerlinStatus(status);
+  }
+
+  // The Merlin entry point in the settings sidebar tab
+  _onRenderSettings(app, html) {
+    if (!game.user.isGM) return;
+    const root = html instanceof HTMLElement ? html : html[0];
+    const invitations = root?.querySelector('button[data-app="invitations"]');
+    if (!invitations || root.querySelector("#merlin-connect-button")) return;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "merlin-connect-button";
+    button.innerHTML = `<i class="fa-solid fa-hat-wizard"></i> <span></span>`;
+    button.addEventListener("click", () => {
+      if (this.merlinEnabled) this._disconnectFromMerlin(true);
+      else this._connectToMerlin();
+    });
+    invitations.before(button);
+    this._updateMerlinUI();
+  }
+
+  _getMerlinStatusDisplay() {
+    switch (this.merlinStatus) {
+      case "linked": return { css: "linked", label: "Connected" };
+      case "waiting":
+      case "disconnected": return { css: "waiting", label: "Waiting for User" };
+      default: return { css: "notfound", label: "Not Found" };
+    }
+  }
+
+  _updateMerlinUI() {
+    const label = document.querySelector("#merlin-connect-button span");
+    if (label) label.textContent = this.merlinEnabled ? "Disconnect Merlin" : "Connect to Merlin";
+    this._renderMerlinStatusWidget();
+  }
+
+  // The status icon beside the active players box, with extra detail once connected. Only exists while connecting/connected.
+  _renderMerlinStatusWidget() {
+    let widget = document.getElementById("merlin-status");
+    if (!this.merlinEnabled) {
+      widget?.remove();
+      this._merlinStatusObserver?.disconnect();
+      this._merlinStatusObserver = null;
+      return;
+    }
+
+    if (!widget) {
+      widget = document.createElement("div");
+      widget.id = "merlin-status";
+      widget.innerHTML = `
+        <div class="merlin-status-icon"><i class="fa-solid fa-hat-wizard"></i></div>
+        <div class="merlin-status-details">
+          <div class="merlin-status-bar"><div class="merlin-status-bar-fill"></div></div>
+          <div class="merlin-status-line merlin-status-downloading"></div>
+          <div class="merlin-status-line merlin-status-loading"></div>
+          <div class="merlin-status-line merlin-status-level"></div>
+        </div>`;
+      widget.querySelector(".merlin-status-icon").addEventListener("click", () => {
+        this._merlinStatusCollapsed = !this._merlinStatusCollapsed;
+        localStorage.setItem("merlin.statusCollapsed", this._merlinStatusCollapsed);
+        widget.classList.toggle("collapsed", this._merlinStatusCollapsed);
+      });
+      document.documentElement.appendChild(widget);
+    }
+
+    const display = this._getMerlinStatusDisplay();
+    const icon = widget.querySelector(".merlin-status-icon");
+    icon.className = `merlin-status-icon ${display.css}`;
+    icon.dataset.tooltip = `Merlin: ${display.label}`;
+    icon.dataset.tooltipDirection = "UP";
+
+    const linked = this.merlinStatus === "linked";
+    const info = this.merlinInfo ?? {};
+    const packages = info.downloadingPackages ?? [];
+    widget.classList.toggle("collapsed", this._merlinStatusCollapsed);
+    widget.classList.toggle("linked", linked);
+
+    const busy = packages.length > 0 || !!info.loadingLevel;
+    const bar = widget.querySelector(".merlin-status-bar");
+    bar.hidden = !busy;
+    bar.querySelector(".merlin-status-bar-fill").style.width = `${Math.round((info.downloadProgress ?? 0) * 100)}%`;
+
+    const setLine = (selector, text) => {
+      const line = widget.querySelector(selector);
+      line.textContent = text;
+      line.hidden = !text;
+    };
+    setLine(".merlin-status-downloading", packages.length ? `Downloading: ${packages.join(", ")}` : "");
+    setLine(".merlin-status-loading", info.loadingLevel ? `Loading: ${info.loadingLevel}` : "");
+    setLine(".merlin-status-level", `Level: ${info.loadedLevel || "None"}`);
+
+    this._positionMerlinStatusWidget();
+  }
+
+  // Sits to the right of the active players box, which moves around with the UI layout
+  _positionMerlinStatusWidget() {
+    const widget = document.getElementById("merlin-status");
+    if (!widget) return;
+    const players = document.getElementById("players-active");
+    if (players) {
+      const rect = players.getBoundingClientRect();
+      widget.style.left = `${rect.right + 8}px`;
+      widget.style.bottom = `${Math.max(window.innerHeight - rect.bottom, 0)}px`;
+      if (!this._merlinStatusObserver) {
+        this._merlinStatusObserver = new ResizeObserver(() => this._positionMerlinStatusWidget());
+        this._merlinStatusObserver.observe(players);
+        this._merlinStatusObserver.observe(document.documentElement);
+      }
+    } else {
+      widget.style.left = "220px";
+      widget.style.bottom = "8px";
+    }
+  }
+
   async _onReady() {
     console.log("Merlin Module | Ready");
+
+    // A reload leaves Merlin in puppet mode; pick the connection back up (sessionStorage survives reloads, not closing the tab)
+    if (sessionStorage.getItem("merlin.connect") === "true") this._connectToMerlin();
 
     // Extend ambient light sheet class with our custom class
     CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls = WithActiveLightConfig(CONFIG.AmbientLight.sheetClasses.base['core.AmbientLightConfig'].cls);
@@ -425,6 +886,9 @@ class Merlin extends Hexcrawl{
 
   async _onCanvasReady(canvas) {
     console.log("Merlin | Canvas Ready");
+    this._originalBackground = null;
+    this._applyMerlinStreamBackground();
+    this._sendMerlinSceneUpdate();
     await this._ensureSceneStableIds(canvas.scene);
     this.overlays = [];
     this.tileCaption = null;
@@ -2096,6 +2560,15 @@ class Merlin extends Hexcrawl{
 Hooks.once("init", () => {
   console.log("Merlin Module | Initializing");
   game.merlin = new Merlin();
+
+  game.settings.register("merlins-miscellany", "merlinServerPort", {
+    name: "Merlin Link Port",
+    hint: "Port of the local Merlin instance's Foundry server (Merlin's FoundryServerPort).",
+    scope: "client",
+    config: false,
+    type: Number,
+    default: 8081
+  });
 
   game.settings.register("merlins-miscellany", "usersUseMerlinVideo", {
     name: "Users Use Merlin Video",

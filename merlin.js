@@ -189,9 +189,43 @@ class Merlin extends Hexcrawl{
   _readMerlinResponse(json) {
     const status = json?.status ?? null;
     this.merlinInfo = json;
+    this._merlinStreamRegion = json?.streamRegion ?? null;
+    this._applyMerlinStreamRegion();
+    this._notifyMerlinPackageErrors(json?.packageErrors);
     const linked = status === "linked" && json.streamUrl;
     this._updateMerlinStream(linked ? json.streamUrl : null, json.streamerId);
     return status;
+  }
+
+  // What to tell the user when Merlin couldn't get a package
+  _describeMerlinPackageError(error) {
+    switch (error.reason) {
+      case "notEntitled": {
+        const tier = error.tier ? ` at tier '${error.tier}'` : "";
+        const link = error.url ? `; get it here: ${error.url}` : "";
+        return `This map requires a subscription to '${error.creator || "its creator"}'${tier}${link}`;
+      }
+      case "noAuth":
+        return `This map ('${error.packageId}') requires a Patreon subscription. Log in to Patreon in Merlin to download it.`;
+      case "incompatible":
+        return `Package '${error.packageId}' was made with a different version of the Merlin SDK than this version of Merlin can read, so it can't be loaded. Its creator needs to make it again.`;
+      case "notFound":
+        return `Package '${error.packageId}' isn't available from the Merlin server.`;
+      default:
+        return `Merlin couldn't download package '${error.packageId}'.`;
+    }
+  }
+
+  // Merlin reports packages it couldn't download on every status response; tell the user once per package
+  _notifyMerlinPackageErrors(errors) {
+    this._merlinPackageErrors = errors ?? [];
+    this._notifiedMerlinErrors ??= new Set();
+    for (const error of this._merlinPackageErrors) {
+      const key = `${error.packageId}|${error.reason}`;
+      if (this._notifiedMerlinErrors.has(key)) continue;
+      this._notifiedMerlinErrors.add(key);
+      ui.notifications.error(`Merlin: ${this._describeMerlinPackageError(error)}`, { permanent: true });
+    }
   }
 
   // Merlin streams its camera view via PixelStreaming; we show it as the current scene's background.
@@ -246,6 +280,10 @@ class Merlin extends Hexcrawl{
         // The stream dropping is how we find out Merlin has closed, as we no longer poll once linked
         if (this.merlinStream === stream) this._checkMerlinAfterStreamLoss();
       });
+      // A stream that can't be (re)established at all, e.g. the signalling server is gone because Merlin crashed
+      stream.ps.addEventListener("webRtcFailed", () => {
+        if (this.merlinStream === stream) this._checkMerlinAfterStreamLoss();
+      });
     } catch (err) {
       console.error("Merlin | Failed to start Merlin video stream:", err);
       if (this.merlinStream === stream) this._stopMerlinStream();
@@ -274,6 +312,9 @@ class Merlin extends Hexcrawl{
     this.merlinStream = null;
     stream.observer?.disconnect();
     this._restoreSceneBackground();
+    // disconnect() doesn't stop the library reconnecting by itself, so a Merlin which has gone away would keep being
+    // retried (and logging refused connections) forever. It only auto-reconnects while this is above zero.
+    try { stream.ps?.config?.setNumericSetting("MaxReconnectAttempts", 0); } catch (err) { /* setting not available */ }
     try { stream.ps?.disconnect(); } catch (err) { console.warn("Merlin | Error closing Merlin video stream:", err); }
     stream.texture?.destroy?.(false);
     stream.parent?.remove();
@@ -317,7 +358,9 @@ class Merlin extends Hexcrawl{
       stream.texture = new PIXI.Texture(new PIXI.BaseTexture(resource));
       // Re-fit if the stream's resolution changes (e.g. the Merlin window is resized); the resource resizes itself
       video.addEventListener("resize", () => {
-        if (this.merlinStream === stream) this._fitSceneBackgroundMesh(this._sceneBackgroundMesh);
+        if (this.merlinStream !== stream) return;
+        this._applyMerlinStreamRegion();
+        this._fitSceneBackgroundMesh(this._sceneBackgroundMesh);
       });
     }
     if (!this._originalBackground || this._originalBackground.mesh !== mesh) {
@@ -326,8 +369,49 @@ class Merlin extends Hexcrawl{
 
     mesh.texture = stream.texture;
     mesh.visible = true;
+    this._applyMerlinStreamRegion();
     this._fitSceneBackgroundMesh(mesh);
     video.play?.().catch(() => {});
+  }
+
+  // Merlin streams its whole window, which has black bars around the image of a camera with its own aspect ratio. It
+  // tells us which part of the window holds the image (as fractions of its width and height), and we show only that part
+  // of the video. Cropping the stream itself instead meant its size changing with each camera, which crashed Merlin.
+  _applyMerlinStreamRegion() {
+    const stream = this.merlinStream;
+    const video = stream?.video;
+    if (!stream?.texture || !video?.videoWidth || !video?.videoHeight) return;
+
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+    const region = this._merlinStreamRegion;
+    const valid = region && region.width > 0 && region.height > 0;
+    const frame = valid
+      ? new PIXI.Rectangle(
+        Math.round(region.x * width), Math.round(region.y * height),
+        Math.max(1, Math.round(region.width * width)), Math.max(1, Math.round(region.height * height)))
+      : new PIXI.Rectangle(0, 0, width, height);
+
+    const current = stream.texture.frame;
+    if (current.x === frame.x && current.y === frame.y && current.width === frame.width && current.height === frame.height) return;
+    stream.texture.frame = frame;
+    this._fitSceneBackgroundMesh(this._sceneBackgroundMesh);
+  }
+
+  // The camera's part of the window can change after Merlin has answered (it works it out once the camera is in place),
+  // so for a few seconds after a scene is sent, ask for the status again to pick it up. Doesn't re-send the scene.
+  _startMerlinRegionPoll() {
+    this._merlinRegionPollUntil = Date.now() + 8000;
+    if (this._merlinRegionTimer) return;
+    const tick = async () => {
+      this._merlinRegionTimer = null;
+      if (!this.merlinEnabled || this.merlinStatus !== "linked" || Date.now() > this._merlinRegionPollUntil) return;
+      await this._fetchMerlinStatus();
+      if (this.merlinEnabled && Date.now() <= this._merlinRegionPollUntil) {
+        this._merlinRegionTimer = setTimeout(tick, 500);
+      }
+    };
+    this._merlinRegionTimer = setTimeout(tick, 500);
   }
 
   // Positions and sizes the mesh to cover the scene rectangle, as Foundry does for the background image
@@ -353,6 +437,7 @@ class Merlin extends Hexcrawl{
     if (this.merlinStatus !== "linked") return;
     try {
       this._handleMerlinStatus(await this._postToMerlin("/scene"));
+      this._startMerlinRegionPoll();
     } catch (err) {
       console.error("Merlin | Failed to send scene to Merlin:", err);
       this._handleMerlinStatus(await this._fetchMerlinStatus());
@@ -377,8 +462,12 @@ class Merlin extends Hexcrawl{
     this._merlinLinkRequested = false;
     clearTimeout(this._merlinPollTimer);
     this._merlinPollTimer = null;
+    clearTimeout(this._merlinRegionTimer);
+    this._merlinRegionTimer = null;
     this._stopMerlinStream();
     this.merlinInfo = null;
+    this._merlinPackageErrors = [];
+    this._notifiedMerlinErrors?.clear();
     this._setMerlinStatus(null);
     this._updateMerlinUI();
   }
@@ -440,6 +529,9 @@ class Merlin extends Hexcrawl{
       const info = this.merlinInfo;
       const busy = info?.downloadingPackages?.length || info?.loadingLevel;
       if (busy) this._scheduleMerlinPoll(1000);
+      // Merlin hasn't got its level and camera in place yet when it links (or while it's downloading or loading), so the
+      // part of its window holding the camera's image isn't known yet. Keep asking until it is, and for a while after.
+      if (previous !== "linked" || busy) this._startMerlinRegionPoll();
     }
   }
 
@@ -455,9 +547,28 @@ class Merlin extends Hexcrawl{
 
   // The video stream dropped: either Merlin closed, or the connection blipped. Ask Merlin once to find out which.
   async _checkMerlinAfterStreamLoss() {
-    if (!this.merlinEnabled || this.merlinStatus !== "linked") return;
-    const status = await this._fetchMerlinStatus();
-    if (status !== "linked") this._handleMerlinStatus(status);
+    if (!this.merlinEnabled || this.merlinStatus !== "linked" || this._checkingMerlinLoss) return;
+    this._checkingMerlinLoss = true;
+    try {
+      // Merlin can be too busy to answer for a moment (e.g. loading a heavy level), so ask twice before giving up on it
+      let status = await this._fetchMerlinStatus();
+      if (status === null) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        if (!this.merlinEnabled) return;
+        status = await this._fetchMerlinStatus();
+      }
+
+      if (status === null) {
+        // It was linked and now can't be reached: Merlin has closed or crashed. Don't keep looking for it (or let the
+        // stream keep retrying a refused connection); disconnect, and the user can connect again when it's back.
+        ui.notifications.warn("Merlin disconnected.");
+        this._disconnectFromMerlin();
+      } else if (status !== "linked") {
+        this._handleMerlinStatus(status);
+      }
+    } finally {
+      this._checkingMerlinLoss = false;
+    }
   }
 
   // The Merlin entry point in the settings sidebar tab
@@ -514,6 +625,7 @@ class Merlin extends Hexcrawl{
           <div class="merlin-status-line merlin-status-downloading"></div>
           <div class="merlin-status-line merlin-status-loading"></div>
           <div class="merlin-status-line merlin-status-level"></div>
+          <div class="merlin-status-line merlin-status-error" hidden></div>
         </div>`;
       widget.querySelector(".merlin-status-icon").addEventListener("click", () => {
         this._merlinStatusCollapsed = !this._merlinStatusCollapsed;
@@ -545,9 +657,35 @@ class Merlin extends Hexcrawl{
       line.textContent = text;
       line.hidden = !text;
     };
-    setLine(".merlin-status-downloading", packages.length ? `Downloading: ${packages.join(", ")}` : "");
+    const fileCount = info.downloadFileCount ?? 0;
+    const fileProgress = fileCount > 1 ? ` (${info.downloadFileIndex}/${fileCount})` : "";
+    setLine(".merlin-status-downloading", info.waitingForPatreonLogin
+      ? "Waiting for you to log in to Patreon in your browser..."
+      : packages.length ? `Downloading${fileProgress}: ${info.downloadingFile || packages.join(", ")}` : "");
     setLine(".merlin-status-loading", info.loadingLevel ? `Loading: ${info.loadingLevel}` : "");
-    setLine(".merlin-status-level", `Level: ${info.loadedLevel || "None"}`);
+    // "Level: None" is redundant while the level is being downloaded
+    setLine(".merlin-status-level", busy || info.waitingForPatreonLogin ? "" : `Level: ${info.loadedLevel || "None"}`);
+
+    // Why the scene's package couldn't be had, with a link to where to get it
+    const errorLine = widget.querySelector(".merlin-status-error");
+    errorLine.replaceChildren();
+    const error = (this._merlinPackageErrors ?? [])[0];
+    errorLine.hidden = !error;
+    if (error) {
+      const message = this._describeMerlinPackageError(error);
+      const url = error.reason === "notEntitled" && /^https:\/\//.test(error.url ?? "") ? error.url : "";
+      if (url && message.endsWith(url)) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = url;
+        errorLine.append(message.slice(0, -url.length), link);
+      } else {
+        errorLine.textContent = message;
+      }
+      errorLine.title = message;
+    }
 
     this._positionMerlinStatusWidget();
   }

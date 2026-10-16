@@ -2845,9 +2845,14 @@ class Merlin extends Hexcrawl{
     const token = sourceScene.tokens.get(tokenId);
 
     // Duplicate the token document
-    const duplToken = foundry.utils.duplicate(token);
-    duplToken.x = targetPosition.x - duplToken.width / 2;
-    duplToken.y = targetPosition.y - duplToken.height / 2;
+    // Use the source data rather than cloning the live document, and drop movement state that belongs to the old scene
+    const duplToken = token.toObject();
+    delete duplToken.movementHistory;
+    delete duplToken._movementHistory;
+    // Positions must be whole pixels: fractional coordinates break keyboard movement snapping.
+    // (width/height are in grid units, so they must not be subtracted from pixel positions.)
+    duplToken.x = Math.round(targetPosition.x);
+    duplToken.y = Math.round(targetPosition.y);
     
     const created = await targetScene.createEmbeddedDocuments("Token", [duplToken]);
     const createdId = created[0]._id;

@@ -1,5 +1,27 @@
 import { Hexcrawl, registerHexcrawlSettings } from "./hexcrawl.js";
 
+// Zoomed in, Merlin renders only the part of the scene we're looking at (see _updateMerlinView).
+// How long after asking Merlin for a new part to wait before showing the stream as that part, while its frames catch up
+const MERLIN_VIEW_APPLY_DELAY_MS = 250;
+// Foundry lines the stream up with a new view when the stream's frames visibly change (see _applyMerlinViewWhenFramesChange).
+// Average difference (0-255) between a frame and the one before, sampled very small, that counts as the view having changed
+const MERLIN_VIEW_CHANGE_THRESHOLD = 4;
+// If no change is seen by then, line up anyway
+const MERLIN_VIEW_APPLY_TIMEOUT_MS = 1000;
+// Every change of view makes Merlin hitch (new detail has to stream in, and its lighting and anti-aliasing history are
+// disturbed), so while panning and zooming it changes at most this often, and only when it has to. The settle time is
+// how long the canvas must be still before checking whether zooming in has left the view much bigger than needed
+const MERLIN_VIEW_THROTTLE_MS = 300;
+const MERLIN_VIEW_SETTLE_MS = 350;
+// How much of the on-screen size to add on each side of the part of the scene we ask for. Each change of view shows in
+// Merlin as the camera jumping, so there is just the one margin: a wide one while moving that was sharpened up when still
+// made the camera jump out and then back in.
+const MERLIN_VIEW_PADDING = 0.12;
+// Once the canvas is still, the part we asked for is asked for again if it is more than this many times the size of what's
+// on screen plus the margin (i.e. after zooming in). While moving, only running out of the part we asked for matters.
+const MERLIN_VIEW_SETTLED_MAX_OVERSIZE = 1.3;
+// With this much of the scene's width and height on screen, Merlin just renders the whole image
+const MERLIN_VIEW_WHOLE_FRACTION = 0.95;
 
 // Value names for the levels of Merlin's video settings
 const MERLIN_QUALITY_LABELS = ["Low", "Medium", "High", "Epic", "Cinematic"];
@@ -166,6 +188,15 @@ class Merlin extends Hexcrawl{
   merlinStream = null;
   // The scene's original background texture, while it's replaced by Merlin's stream
   _originalBackground = null;
+  // While zoomed in, Merlin renders just the part of the scene we're looking at, so the stream isn't upscaled.
+  // The part we last asked for ({x, y, width, height} as fractions of the scene), or null for the whole scene
+  _merlinViewRequest = null;
+  // The part of the scene the stream actually shows (same units), as last reported by Merlin; null for the whole scene
+  _merlinAppliedView = null;
+  _merlinViewTimer = null;
+  _merlinViewApplyTimer = null;
+  _merlinViewInFlight = false;
+  _merlinViewDirty = false;
 
   get _merlinUrl() {
     const port = game.settings.get("merlins-miscellany", "merlinServerPort");
@@ -221,11 +252,16 @@ class Merlin extends Hexcrawl{
   }
 
   // Reads Merlin's status response, which also tells us where to find its video stream. Returns the link status.
-  _readMerlinResponse(json) {
+  // delayView is for the response to a request to change the part of the scene Merlin renders: the stream takes a moment
+  // to show the new view, so wait until it does before lining the texture up with it.
+  _readMerlinResponse(json, delayView = false) {
     const status = json?.status ?? null;
     this.merlinInfo = json;
-    this._merlinStreamRegion = json?.streamRegion ?? null;
-    this._applyMerlinStreamRegion();
+    if (delayView) {
+      this._applyMerlinViewWhenFramesChange(json?.streamRegion, json?.viewRect);
+    } else if (!this._merlinViewPending) {
+      this._setMerlinStreamView(json?.streamRegion, json?.viewRect);
+    }
     this._notifyMerlinPackageErrors(json?.packageErrors);
     const linked = status === "linked" && json.streamUrl;
     this._updateMerlinStream(linked ? json.streamUrl : null, json.streamerId);
@@ -309,6 +345,7 @@ class Merlin extends Hexcrawl{
         this._parkMerlinStreamVideo(stream);
         console.log("Merlin | Merlin video stream connected");
         this._applyMerlinStreamBackground();
+        this._updateMerlinView(true);
       });
       stream.ps.addEventListener("webRtcDisconnected", () => {
         this._restoreSceneBackground();
@@ -346,6 +383,11 @@ class Merlin extends Hexcrawl{
     if (!stream) return;
     this.merlinStream = null;
     stream.observer?.disconnect();
+    clearTimeout(this._merlinViewTimer);
+    clearTimeout(this._merlinSettleTimer);
+    this._cancelMerlinViewWatch();
+    this._merlinViewTimer = this._merlinSettleTimer = null;
+    this._merlinViewRequest = this._merlinAppliedView = null;
     this._restoreSceneBackground();
     // disconnect() doesn't stop the library reconnecting by itself, so a Merlin which has gone away would keep being
     // retried (and logging refused connections) forever. It only auto-reconnects while this is above zero.
@@ -433,6 +475,183 @@ class Merlin extends Hexcrawl{
     this._fitSceneBackgroundMesh(this._sceneBackgroundMesh);
   }
 
+  _isSameMerlinView(region, view) {
+    const whole = { x: 0, y: 0, width: 1, height: 1 };
+    const normal = rect => (rect?.width > 0 && rect?.height > 0 ? rect : whole);
+    const same = (a, b) => ["x", "y", "width", "height"].every(key => Math.abs(normal(a)[key] - normal(b)[key]) < 0.0005);
+    return same(region, this._merlinStreamRegion) && same(view, this._merlinAppliedView);
+  }
+
+  _cancelMerlinViewWatch() {
+    if (this._merlinViewWatch) this._merlinViewWatch.cancelled = true;
+    this._merlinViewWatch = null;
+    clearTimeout(this._merlinViewApplyTimer);
+    this._merlinViewApplyTimer = null;
+    this._merlinViewPending = false;
+  }
+
+  // Merlin changes what it renders as soon as it is asked to, but the new frames reach us some time later, by an amount that
+  // varies. Lining the texture up with the new view before they arrive (or after) makes the picture jump, so watch the
+  // stream and line up on the first frame that looks different from the one before it. Falls back to a timer if the
+  // browser can't tell us about frames, and to a timeout if the view changes too little to see.
+  _applyMerlinViewWhenFramesChange(region, view) {
+    this._cancelMerlinViewWatch();
+    if (this._isSameMerlinView(region, view)) return;
+
+    const apply = () => {
+      this._cancelMerlinViewWatch();
+      this._setMerlinStreamView(region, view);
+    };
+    this._merlinViewPending = true;
+    this._merlinViewApplyTimer = setTimeout(apply, MERLIN_VIEW_APPLY_TIMEOUT_MS);
+
+    const video = this.merlinStream?.video;
+    // For testing: localStorage.setItem("merlin.noFrameWatch", "true") and reload uses the fixed delay instead
+    if (!video?.requestVideoFrameCallback || !video.videoWidth || localStorage.getItem("merlin.noFrameWatch") === "true") {
+      clearTimeout(this._merlinViewApplyTimer);
+      this._merlinViewApplyTimer = setTimeout(apply, MERLIN_VIEW_APPLY_DELAY_MS);
+      return;
+    }
+
+    const width = 32;
+    const height = 18;
+    if (!this._merlinFrameSampler) {
+      const sampleCanvas = document.createElement("canvas");
+      sampleCanvas.width = width;
+      sampleCanvas.height = height;
+      this._merlinFrameSampler = sampleCanvas.getContext("2d", { willReadFrequently: true });
+    }
+    const sampler = this._merlinFrameSampler;
+    const sample = () => {
+      sampler.drawImage(video, 0, 0, width, height);
+      return sampler.getImageData(0, 0, width, height).data;
+    };
+
+    const watch = this._merlinViewWatch = { cancelled: false };
+    let previous = sample();
+    const onFrame = () => {
+      if (watch.cancelled) return;
+      const current = sample();
+      let total = 0;
+      for (let i = 0; i < current.length; i += 4) {
+        total += Math.abs(current[i] - previous[i]) + Math.abs(current[i + 1] - previous[i + 1]) + Math.abs(current[i + 2] - previous[i + 2]);
+      }
+      if (total / (width * height * 3) >= MERLIN_VIEW_CHANGE_THRESHOLD) return apply();
+      previous = current;
+      video.requestVideoFrameCallback(onFrame);
+    };
+    video.requestVideoFrameCallback(onFrame);
+  }
+
+  // Lines the stream up with the part of the window and of the scene Merlin says it holds
+  _setMerlinStreamView(region, view) {
+    this._merlinStreamRegion = region ?? null;
+    this._merlinAppliedView = view?.width > 0 && view?.height > 0 ? view : null;
+    this._applyMerlinStreamRegion();
+    this._fitSceneBackgroundMesh(this._sceneBackgroundMesh);
+  }
+
+  // The part of the scene on screen, as fractions of the scene's size, or null if none of the scene is
+  _visibleSceneFractions() {
+    const d = canvas.dimensions;
+    const stage = canvas.stage;
+    if (!d || !stage || !canvas.app?.screen) return null;
+    const scale = stage.scale.x;
+    const width = canvas.app.screen.width / scale;
+    const height = canvas.app.screen.height / scale;
+    const left = stage.pivot.x - width / 2;
+    const top = stage.pivot.y - height / 2;
+    const x0 = Math.max(0, (left - d.sceneX) / d.sceneWidth);
+    const y0 = Math.max(0, (top - d.sceneY) / d.sceneHeight);
+    const x1 = Math.min(1, (left + width - d.sceneX) / d.sceneWidth);
+    const y1 = Math.min(1, (top + height - d.sceneY) / d.sceneHeight);
+    return x1 > x0 && y1 > y0 ? { x0, y0, x1, y1 } : null;
+  }
+
+  _isWholeSceneVisible(visible) {
+    return !visible
+      || ((visible.x1 - visible.x0) >= MERLIN_VIEW_WHOLE_FRACTION && (visible.y1 - visible.y0) >= MERLIN_VIEW_WHOLE_FRACTION);
+  }
+
+  // Whether the part of the scene we asked Merlin for no longer suits what's on screen: it doesn't cover it any more, or
+  // it's so much bigger than it that the stream is being wasted
+  _merlinViewNeedsUpdate(visible, requested, settled) {
+    if (this._isWholeSceneVisible(visible)) return !!requested;
+    if (!requested) return true;
+    const epsilon = 0.002;
+    const covers = visible.x0 >= requested.x - epsilon && visible.y0 >= requested.y - epsilon
+      && visible.x1 <= requested.x + requested.width + epsilon && visible.y1 <= requested.y + requested.height + epsilon;
+    const fitFactor = (1 + 2 * MERLIN_VIEW_PADDING) * MERLIN_VIEW_SETTLED_MAX_OVERSIZE;
+    const tooBig = settled && (requested.width > (visible.x1 - visible.x0) * fitFactor
+      || requested.height > (visible.y1 - visible.y0) * fitFactor);
+    return !covers || tooBig;
+  }
+
+  // Called as the canvas pans and zooms. Looks at it now and then while it moves, and once more when it has stopped.
+  _scheduleMerlinViewUpdate() {
+    if (this.merlinStatus !== "linked") return;
+    clearTimeout(this._merlinSettleTimer);
+    this._merlinSettleTimer = setTimeout(() => {
+      this._merlinSettleTimer = null;
+      this._updateMerlinView(false, true);
+    }, MERLIN_VIEW_SETTLE_MS);
+    if (this._merlinViewTimer) return;
+    this._merlinViewTimer = setTimeout(() => {
+      this._merlinViewTimer = null;
+      this._updateMerlinView();
+    }, MERLIN_VIEW_THROTTLE_MS);
+  }
+
+  // Asks Merlin to render just the part of the scene that's on screen (plus a margin), so that zooming in shows more of
+  // the stream's pixels rather than stretching the whole image. Merlin replies with the part it will actually render,
+  // which can differ from what we asked for (it matches the window's shape, and stays within the image).
+  // force sends the request again even if the last one still suits.
+  async _updateMerlinView(force = false, settled = false) {
+    if (this.merlinStatus !== "linked" || !this.merlinStream?.video || !canvas.ready) return;
+    const merlinFlags = canvas.scene?.flags?.merlin;
+    if (!merlinFlags?.merlinPackageId && !merlinFlags?.merlinLevelId) return;
+
+    // With adaptive zoom off, Merlin streams the whole image; all that is left to do is take back any view already asked for
+    const enabled = game.settings.get("merlins-miscellany", "adaptiveZoom");
+    const visible = this._visibleSceneFractions();
+    const needsUpdate = enabled ? this._merlinViewNeedsUpdate(visible, this._merlinViewRequest, settled) : !!this._merlinViewRequest;
+    if (!needsUpdate && !(force && this._merlinViewRequest)) return;
+    if (this._merlinViewInFlight) {
+      // Try again once the request in flight is done
+      this._merlinViewDirty = true;
+      this._merlinViewDirtySettled ||= settled;
+      return;
+    }
+
+    let request = null;
+    if (enabled && !this._isWholeSceneVisible(visible)) {
+      const padX = (visible.x1 - visible.x0) * MERLIN_VIEW_PADDING;
+      const padY = (visible.y1 - visible.y0) * MERLIN_VIEW_PADDING;
+      request = { x: visible.x0 - padX, y: visible.y0 - padY, width: visible.x1 - visible.x0 + 2 * padX, height: visible.y1 - visible.y0 + 2 * padY };
+    }
+
+    this._merlinViewInFlight = true;
+    this._merlinViewRequest = request;
+    try {
+      const response = await fetch(`${this._merlinUrl}/view`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify(request ?? { x: 0, y: 0, width: 0, height: 0 }),
+        signal: AbortSignal.timeout(3000)
+      });
+      if (response.ok && this.merlinStatus === "linked") this._readMerlinResponse(await response.json(), true);
+    } catch (err) {
+      console.warn("Merlin | Failed to send view to Merlin:", err);
+    } finally {
+      this._merlinViewInFlight = false;
+      if (this._merlinViewDirty) {
+        const dirtySettled = this._merlinViewDirtySettled;
+        this._merlinViewDirty = this._merlinViewDirtySettled = false;
+        this._updateMerlinView(false, dirtySettled);
+      }
+    }
+  }
+
   // The camera's part of the window can change after Merlin has answered (it works it out once the camera is in place),
   // so for a few seconds after a scene is sent, ask for the status again to pick it up. Doesn't re-send the scene.
   _startMerlinRegionPoll() {
@@ -440,7 +659,12 @@ class Merlin extends Hexcrawl{
     if (this._merlinRegionTimer) return;
     const tick = async () => {
       this._merlinRegionTimer = null;
-      if (!this.merlinEnabled || this.merlinStatus !== "linked" || Date.now() > this._merlinRegionPollUntil) return;
+      if (!this.merlinEnabled || this.merlinStatus !== "linked") return;
+      if (Date.now() > this._merlinRegionPollUntil) {
+        // Merlin may have opened its level and camera since we last told it what part of the scene we're looking at
+        this._updateMerlinView(true);
+        return;
+      }
       await this._fetchMerlinStatus();
       if (this.merlinEnabled && Date.now() <= this._merlinRegionPollUntil) {
         this._merlinRegionTimer = setTimeout(tick, 500);
@@ -449,13 +673,16 @@ class Merlin extends Hexcrawl{
     this._merlinRegionTimer = setTimeout(tick, 500);
   }
 
-  // Positions and sizes the mesh to cover the scene rectangle, as Foundry does for the background image
+  // Positions and sizes the mesh to cover the scene rectangle, as Foundry does for the background image. Merlin's stream
+  // may hold just part of the scene (when zoomed in), in which case the mesh covers only that part.
   _fitSceneBackgroundMesh(mesh) {
     if (!mesh || mesh.destroyed) return;
     const d = canvas.dimensions;
-    mesh.position.set(d.sceneX, d.sceneY);
-    mesh.width = d.sceneWidth;
-    mesh.height = d.sceneHeight;
+    const view = mesh.texture === this.merlinStream?.texture ? this._merlinAppliedView : null;
+    const { x, y, width, height } = view ?? { x: 0, y: 0, width: 1, height: 1 };
+    mesh.position.set(d.sceneX + x * d.sceneWidth, d.sceneY + y * d.sceneHeight);
+    mesh.width = width * d.sceneWidth;
+    mesh.height = height * d.sceneHeight;
   }
 
   _restoreSceneBackground() {
@@ -473,6 +700,8 @@ class Merlin extends Hexcrawl{
     try {
       this._handleMerlinStatus(await this._postToMerlin("/scene"));
       this._startMerlinRegionPoll();
+      // A new scene starts out showing the whole image
+      this._updateMerlinView(true);
     } catch (err) {
       console.error("Merlin | Failed to send scene to Merlin:", err);
       this._handleMerlinStatus(await this._fetchMerlinStatus());
@@ -1317,6 +1546,7 @@ class Merlin extends Hexcrawl{
   async _onCanvasReady(canvas) {
     console.log("Merlin | Canvas Ready");
     this._originalBackground = null;
+    this._merlinViewRequest = this._merlinAppliedView = null;
     this._applyMerlinStreamBackground();
     this._sendMerlinSceneUpdate();
     await this._ensureSceneStableIds(canvas.scene);
@@ -1418,8 +1648,9 @@ class Merlin extends Hexcrawl{
 
   overworldZoomOutThreshold = 0.65;
 
-  _onCanvasPan(canvas, position) {    
+  _onCanvasPan(canvas, position) {
     if(!canvas.ready) return;
+    this._scheduleMerlinViewUpdate();
     // Only trigger on zoom changes, not panning
     if(position.x != this.prevPanPosition?.x || position.y != this.prevPanPosition?.y){
       this.prevPanPosition = position;
@@ -3020,6 +3251,16 @@ Hooks.once("init", () => {
     config: false,
     type: Number,
     default: 8081
+  });
+
+  game.settings.register("merlins-miscellany", "adaptiveZoom", {
+    name: "Adaptive Zoom",
+    hint: "Merlin updates its camera as you zoom in/out, giving better image quality, at the cost of some jittering as you move.",
+    scope: "client",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: () => game.merlin?._updateMerlinView(true, true)
   });
 
   game.settings.register("merlins-miscellany", "usersUseMerlinVideo", {

@@ -1,5 +1,37 @@
 import { Hexcrawl, registerHexcrawlSettings } from "./hexcrawl.js";
 
+
+// Value names for the levels of Merlin's video settings
+const MERLIN_QUALITY_LABELS = ["Low", "Medium", "High", "Epic", "Cinematic"];
+const MERLIN_OFF_QUALITY_LABELS = ["Off", "Low", "Medium", "High", "Epic", "Cinematic"];
+const MERLIN_POST_PROCESSING_LABELS = ["Low", "Medium", "High", "Very High", "Highest"];
+// The sliders in Merlin's video settings window, in order: [name Merlin knows it by, label, highest value, value names, values].
+// Where values is given, the slider's positions stand for those values in Merlin rather than for 0, 1, 2...
+const MERLIN_VIDEO_SLIDERS = [
+  ["viewDistance", "View Distance", 4, ["Near", "Medium", "Far", "Epic", "Cinematic"]],
+  ["aaQuality", "Anti-Aliasing Quality", 4, MERLIN_OFF_QUALITY_LABELS],
+  ["aaMode", "Anti-Aliasing Mode", 4, ["Off", "FXAA", "TAA", "MSAA", "TSR"]],
+  ["postProcessing", "Post Processing", 4, MERLIN_POST_PROCESSING_LABELS],
+  ["shadowQuality", "Shadow Quality", 4, MERLIN_QUALITY_LABELS],
+  ["textureQuality", "Texture Quality", 4, MERLIN_QUALITY_LABELS],
+  ["foliageQuality", "Foliage Quality", 4, MERLIN_QUALITY_LABELS],
+  ["shadingQuality", "Shading Quality", 4, MERLIN_QUALITY_LABELS],
+  ["motionBlur", "Motion Blur", 4, MERLIN_QUALITY_LABELS],
+  ["effects", "Effects", 4, MERLIN_OFF_QUALITY_LABELS],
+  ["globalIllumination", "Global Illumination", 4, MERLIN_OFF_QUALITY_LABELS],
+  ["ambientOcclusion", "Ambient Occlusion", 3, MERLIN_OFF_QUALITY_LABELS],
+  ["screenSpaceReflections", "Screen Space Reflections", 4, MERLIN_POST_PROCESSING_LABELS],
+  ["volumetricFog", "Volumetric Fog", 4, MERLIN_OFF_QUALITY_LABELS],
+  ["resolutionScale", "Render Resolution", 5, ["50%", "60%", "70%", "80%", "90%", "100%"], [50, 60, 70, 80, 90, 100]],
+  ["frameRateLimit", "Frame Rate Limit", 4, ["15 FPS", "30 FPS", "45 FPS", "60 FPS", "Unlimited"], [15, 30, 45, 60, 0]]
+];
+const MERLIN_VIDEO_CHECKBOXES = [
+  ["vsync", "VSync"],
+  ["dynamicShadows", "Dynamic Shadows"],
+  ["contactShadows", "Contact Shadows"],
+  ["subsurfaceScattering", "Subsurface Scattering"]
+];
+
 /**
  * Light Watcher Module
  * - Adds flags to AmbientLight config
@@ -127,8 +159,9 @@ class Merlin extends Hexcrawl{
   // True once we've asked Merlin to link (or found it waiting for the user), so that a drop back to
   // "disconnected" means the user declined
   _merlinLinkRequested = false;
-  _merlinStatusCollapsed = localStorage.getItem("merlin.statusCollapsed") !== "false";
   _merlinStatusObserver = null;
+  // The video settings window, while open: { element, snapshot, current, recommended, queue }
+  _merlinSettings = null;
   // The PixelStreaming connection to Merlin, if any: { url, streamerId, ps, parent, video, texture }
   merlinStream = null;
   // The scene's original background texture, while it's replaced by Merlin's stream
@@ -154,6 +187,8 @@ class Merlin extends Hexcrawl{
     if (status === this.merlinStatus) return;
     this.merlinStatus = status;
     console.log(`Merlin | Merlin status: ${status ?? "not running"}`);
+    // The settings window is only for a live link, however the link ended
+    if (status !== "linked") this._closeMerlinSettings();
   }
 
   // The merlin.merlinPackageId / merlin.merlinLevelId flags identify which Merlin package and level a scene corresponds to.
@@ -624,13 +659,11 @@ class Merlin extends Hexcrawl{
           <div class="merlin-status-bar"><div class="merlin-status-bar-fill"></div></div>
           <div class="merlin-status-line merlin-status-downloading"></div>
           <div class="merlin-status-line merlin-status-loading"></div>
-          <div class="merlin-status-line merlin-status-level"></div>
           <div class="merlin-status-line merlin-status-error" hidden></div>
         </div>`;
+      // The settings are only available once linked
       widget.querySelector(".merlin-status-icon").addEventListener("click", () => {
-        this._merlinStatusCollapsed = !this._merlinStatusCollapsed;
-        localStorage.setItem("merlin.statusCollapsed", this._merlinStatusCollapsed);
-        widget.classList.toggle("collapsed", this._merlinStatusCollapsed);
+        if (this.merlinStatus === "linked") this._toggleMerlinSettings();
       });
       document.documentElement.appendChild(widget);
     }
@@ -644,8 +677,8 @@ class Merlin extends Hexcrawl{
     const linked = this.merlinStatus === "linked";
     const info = this.merlinInfo ?? {};
     const packages = info.downloadingPackages ?? [];
-    widget.classList.toggle("collapsed", this._merlinStatusCollapsed);
     widget.classList.toggle("linked", linked);
+    icon.classList.toggle("clickable", linked);
 
     const busy = packages.length > 0 || !!info.loadingLevel;
     const bar = widget.querySelector(".merlin-status-bar");
@@ -663,8 +696,6 @@ class Merlin extends Hexcrawl{
       ? "Waiting for you to log in to Patreon in your browser..."
       : packages.length ? `Downloading${fileProgress}: ${info.downloadingFile || packages.join(", ")}` : "");
     setLine(".merlin-status-loading", info.loadingLevel ? `Loading: ${info.loadingLevel}` : "");
-    // "Level: None" is redundant while the level is being downloaded
-    setLine(".merlin-status-level", busy || info.waitingForPatreonLogin ? "" : `Level: ${info.loadedLevel || "None"}`);
 
     // Why the scene's package couldn't be had, with a link to where to get it
     const errorLine = widget.querySelector(".merlin-status-error");
@@ -687,7 +718,268 @@ class Merlin extends Hexcrawl{
       errorLine.title = message;
     }
 
+    // Only takes up room while there's something to show
+    widget.classList.toggle("has-details", linked && (busy || !!info.waitingForPatreonLogin || !!error));
+
+    // The settings window is only for a live link
+    if (linked) this._updateMerlinSettingsLevel();
+    else this._closeMerlinSettings();
+
     this._positionMerlinStatusWidget();
+  }
+
+  _toggleMerlinSettings() {
+    if (this._merlinSettings) this._closeMerlinSettings();
+    else this._openMerlinSettings();
+  }
+
+  // "Merlin Level: ..." at the foot of the settings window
+  _updateMerlinSettingsLevel() {
+    const label = this._merlinSettings?.element.querySelector(".merlin-settings-level");
+    if (!label) return;
+    const info = this.merlinInfo ?? {};
+    label.textContent = `Level: ${info.loadingLevel || info.loadedLevel || "None"}`;
+  }
+
+  // Reads or writes Merlin's video settings. Writes are queued so that they reach Merlin in the order they were made.
+  _requestMerlinSettings(body) {
+    const send = async () => {
+      const response = await fetch(`${this._merlinUrl}/settings`, body === undefined
+        ? { signal: AbortSignal.timeout(5000) }
+        : { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    };
+    const state = this._merlinSettings;
+    if (!state || body === undefined) return send();
+    return state.queue = state.queue.catch(() => {}).then(send);
+  }
+
+  async _openMerlinSettings() {
+    if (this._merlinSettings) return;
+    const state = this._merlinSettings = { element: null, snapshot: null, current: null, recommended: false, queue: Promise.resolve() };
+    let data;
+    try {
+      data = await this._requestMerlinSettings();
+    } catch (err) {
+      console.error("Merlin | Failed to read Merlin's settings:", err);
+      ui.notifications.warn("Couldn't read Merlin's video settings.");
+      if (this._merlinSettings === state) this._merlinSettings = null;
+      return;
+    }
+    // Closed (or Merlin disconnected) while we were waiting
+    if (this._merlinSettings !== state) return;
+
+    state.snapshot = this._pickMerlinSettings(data);
+    state.current = data;
+    state.element = this._buildMerlinSettingsWindow(state);
+    document.body.appendChild(state.element);
+    this._applyMerlinSettingsToWindow(state);
+    this._updateMerlinSettingsLevel();
+  }
+
+  // Just the settings which the user can change (and undo)
+  _pickMerlinSettings(data) {
+    return { values: { ...data.values } };
+  }
+
+  // Whether the settings differ from the last ones applied
+  _merlinSettingsChanged(state) {
+    return JSON.stringify(this._pickMerlinSettings(state.current)) !== JSON.stringify(state.snapshot);
+  }
+
+  // Closing doesn't apply anything: changes that weren't applied are taken back
+  _closeMerlinSettings() {
+    const state = this._merlinSettings;
+    if (!state) return;
+    this._merlinSettings = null;
+    state.element?.remove();
+    // If Merlin is gone, there's nothing to tell
+    if (state.element && (state.recommended || this._merlinSettingsChanged(state))) {
+      fetch(`${this._merlinUrl}/settings`, {
+        method: "POST", headers: { "Content-Type": "text/plain" },
+        // The recommended settings changed the engine's settings directly; applying the user's puts them back
+        body: JSON.stringify({ values: state.snapshot.values, commit: state.recommended })
+      }).catch(() => {});
+    }
+  }
+
+  // Sends a change to Merlin and takes up what it says the settings are now
+  async _changeMerlinSettings(change, { refreshAll = false } = {}) {
+    const state = this._merlinSettings;
+    if (!state) return;
+    try {
+      const data = await this._requestMerlinSettings(change);
+      if (this._merlinSettings !== state) return;
+      state.current = refreshAll ? data : { ...state.current, preset: data.preset, recommended: data.recommended };
+      this._applyMerlinSettingsToWindow(state);
+      return data;
+    } catch (err) {
+      console.error("Merlin | Failed to change Merlin's settings:", err);
+      ui.notifications.warn("Couldn't change Merlin's video settings.");
+    }
+  }
+
+  // Slider positions to and from the values Merlin has
+  _merlinSliderPosition(spec, value) {
+    const map = spec[4];
+    if (!map) return Math.min(Math.max(Number(value) || 0, 0), spec[2]);
+    let best = 0;
+    map.forEach((v, i) => { if (Math.abs(v - value) < Math.abs(map[best] - value)) best = i; });
+    return best;
+  }
+
+  _merlinSliderValue(spec, position) {
+    return spec[4] ? spec[4][position] : position;
+  }
+
+  _buildMerlinSettingsWindow(state) {
+    const el = document.createElement("div");
+    el.id = "merlin-settings";
+    const slider = ([key, label, max]) => `
+      <div class="merlin-settings-row" data-key="${key}">
+        <label>${label}</label>
+        <div class="merlin-settings-slider">
+          <button type="button" data-step="-1"><i class="fa-solid fa-chevron-left"></i></button>
+          <input type="range" min="0" max="${max}" step="1">
+          <button type="button" data-step="1"><i class="fa-solid fa-chevron-right"></i></button>
+          <span class="merlin-settings-value"></span>
+        </div>
+      </div>`;
+    const checkbox = ([key, label]) => `
+      <label class="merlin-settings-check"><input type="checkbox" data-key="${key}"> ${label}</label>`;
+    el.innerHTML = `
+      <header class="merlin-settings-header">
+        <span><i class="fa-solid fa-hat-wizard"></i> Merlin Video Settings</span>
+        <a class="merlin-settings-close" data-tooltip="Close"><i class="fa-solid fa-xmark"></i></a>
+      </header>
+      <div class="merlin-settings-body">
+        <div class="merlin-settings-row">
+          <label>Quality Preset</label>
+          <select class="merlin-settings-preset"></select>
+        </div>
+        <a class="merlin-settings-advanced-toggle"><i class="fa-solid fa-chevron-right"></i> Advanced</a>
+        <div class="merlin-settings-advanced" hidden>
+          ${MERLIN_VIDEO_SLIDERS.map(slider).join("")}
+          <div class="merlin-settings-checks">${MERLIN_VIDEO_CHECKBOXES.map(checkbox).join("")}</div>
+        </div>
+      </div>
+      <footer class="merlin-settings-footer">
+        <span class="merlin-settings-level"></span>
+        <button type="button" class="merlin-settings-undo">Undo Changes</button>
+        <button type="button" class="merlin-settings-apply">Apply</button>
+      </footer>`;
+
+    el.querySelector(".merlin-settings-close").addEventListener("click", () => this._closeMerlinSettings());
+    this._makeMerlinSettingsDraggable(el, el.querySelector(".merlin-settings-header"));
+
+    el.querySelector(".merlin-settings-advanced-toggle").addEventListener("click", event => {
+      const advanced = el.querySelector(".merlin-settings-advanced");
+      advanced.hidden = !advanced.hidden;
+      event.currentTarget.querySelector("i").className = `fa-solid fa-chevron-${advanced.hidden ? "right" : "down"}`;
+    });
+
+    el.querySelector(".merlin-settings-preset").addEventListener("change", event => {
+      const preset = event.target.value;
+      if (preset === "Custom") return;
+      if (preset === "Recommended") {
+        state.recommended = true;
+        this._changeMerlinSettings({ recommended: true });
+      } else {
+        state.recommended = false;
+        this._changeMerlinSettings({ preset }, { refreshAll: true });
+      }
+    });
+    el.querySelector(".merlin-settings-apply").addEventListener("click", async () => {
+      const data = await this._changeMerlinSettings({ commit: true });
+      // What's applied now is what Undo and closing go back to. The recommended settings aren't saved, so they stay as they are.
+      if (data && !state.recommended) state.snapshot = this._pickMerlinSettings(state.current);
+      if (data) this._applyMerlinSettingsToWindow(state);
+    });
+    el.querySelector(".merlin-settings-undo").addEventListener("click", () => {
+      const wasRecommended = state.recommended;
+      state.recommended = false;
+      this._changeMerlinSettings({ values: state.snapshot.values, commit: wasRecommended }, { refreshAll: true });
+    });
+
+    const setValue = (key, value) => {
+      state.recommended = false;
+      state.current.values[key] = value;
+      this._changeMerlinSettings({ values: { [key]: value } });
+      this._applyMerlinSettingsToWindow(state);
+    };
+    for (const spec of MERLIN_VIDEO_SLIDERS) {
+      const key = spec[0];
+      const row = el.querySelector(`.merlin-settings-row[data-key="${key}"]`);
+      const input = row.querySelector("input[type=range]");
+      // Show the new value while dragging, but only tell Merlin once it's let go
+      input.addEventListener("input", () => {
+        state.current.values[key] = this._merlinSliderValue(spec, Number(input.value));
+        this._applyMerlinSettingsToWindow(state);
+      });
+      input.addEventListener("change", () => setValue(key, this._merlinSliderValue(spec, Number(input.value))));
+      for (const button of row.querySelectorAll("button[data-step]")) {
+        button.addEventListener("click", () => {
+          const count = spec[2] + 1;
+          const position = (Number(input.value) + Number(button.dataset.step) + count) % count;
+          setValue(key, this._merlinSliderValue(spec, position));
+        });
+      }
+    }
+    for (const input of el.querySelectorAll("input[type=checkbox][data-key]")) {
+      input.addEventListener("change", () => setValue(input.dataset.key, input.checked));
+    }
+    return el;
+  }
+
+  // Shows the current settings in the window
+  _applyMerlinSettingsToWindow(state) {
+    const el = state.element;
+    const data = state.current;
+    if (!el || !data) return;
+
+    for (const spec of MERLIN_VIDEO_SLIDERS) {
+      const row = el.querySelector(`.merlin-settings-row[data-key="${spec[0]}"]`);
+      const position = this._merlinSliderPosition(spec, data.values[spec[0]]);
+      row.querySelector("input[type=range]").value = position;
+      row.querySelector(".merlin-settings-value").textContent = spec[3][position] ?? "Unknown";
+    }
+    for (const input of el.querySelectorAll("input[type=checkbox][data-key]")) {
+      input.checked = !!data.values[input.dataset.key];
+    }
+
+    // The preset which the settings amount to; "Recommended" if that was chosen, and "Custom" if it's none
+    const preset = el.querySelector(".merlin-settings-preset");
+    const selected = state.recommended ? "Recommended" : data.preset;
+    const names = [...MERLIN_QUALITY_LABELS];
+    if (data.recommended) names.push("Recommended");
+    if (selected === "Custom") names.push("Custom");
+    preset.replaceChildren(...names.map(n => new Option(n, n)));
+    preset.value = selected;
+
+    const changed = this._merlinSettingsChanged(state);
+    el.querySelector(".merlin-settings-undo").disabled = !changed && !state.recommended;
+    el.querySelector(".merlin-settings-apply").disabled = !changed && !state.recommended;
+  }
+
+  _makeMerlinSettingsDraggable(el, handle) {
+    handle.addEventListener("pointerdown", event => {
+      if (event.target.closest(".merlin-settings-close")) return;
+      const rect = el.getBoundingClientRect();
+      const offsetX = event.clientX - rect.left;
+      const offsetY = event.clientY - rect.top;
+      const move = e => {
+        el.style.left = `${Math.min(Math.max(e.clientX - offsetX, 0), window.innerWidth - 80)}px`;
+        el.style.top = `${Math.min(Math.max(e.clientY - offsetY, 0), window.innerHeight - 40)}px`;
+      };
+      const stop = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", stop);
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", stop);
+      event.preventDefault();
+    });
   }
 
   // Sits to the right of the active players box, which moves around with the UI layout

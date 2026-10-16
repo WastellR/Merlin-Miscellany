@@ -1378,8 +1378,7 @@ class Merlin extends Hexcrawl{
     const scene = canvas.scene;
     if (!scene) return;
 
-    const thumb = scene.thumb;
-    if(await this._isValidFilePath(thumb)) return;
+    if(!(await this._needsThumbnailRegen(scene))) return;
     if (this._regenInProgress) return;
     this._regenInProgress = true;
 
@@ -1388,8 +1387,11 @@ class Merlin extends Hexcrawl{
     try {
       let count = 0;
       for (let s of game.scenes) {
-        if(await this._isValidFilePath(s.thumb)) continue;
+        if(!(await this._needsThumbnailRegen(s))) continue;
+        // Never attempt the same scene twice in a session, even if it still looks invalid afterwards
+        this._thumbRegenAttempted.add(s.id);
         const t = await s.createThumbnail();
+        if(!t?.thumb) continue;
         await s.update({ thumb: t.thumb });
         count++;
       }
@@ -1403,7 +1405,17 @@ class Merlin extends Hexcrawl{
       this._regenInProgress = false;
     }
   }
-  
+
+  // Scenes we have already tried to regenerate a thumbnail for this session
+  _thumbRegenAttempted = new Set();
+
+  async _needsThumbnailRegen(scene) {
+    if(this._thumbRegenAttempted.has(scene.id)) return false;
+    // Nothing to render a thumbnail from
+    if(!scene.background?.src && !scene.tiles?.size) return false;
+    return !(await this._isValidFilePath(scene.thumb));
+  }
+
   overworldZoomOutThreshold = 0.65;
 
   _onCanvasPan(canvas, position) {    
@@ -1664,20 +1676,25 @@ class Merlin extends Hexcrawl{
 
     // Ignore base64 thumbnails (these are always "valid")
     if (path.startsWith("data:image")) return true;
+    // Remote files can't be browsed, so assume they are fine
+    if (/^https?:\/\//i.test(path)) return true;
 
     try {
-      // Split into directory + filename
-      const parts = path.split("/");
+      // Strip cache-busting query/hash, then split into directory + filename
+      const clean = path.split(/[?#]/)[0];
+      const parts = clean.split("/");
       const filename = parts.pop();
       const dir = parts.join("/");
+      const decode = (str) => { try { return decodeURIComponent(str); } catch { return str; } };
+      const target = decode(filename);
 
       // Determine source (data/public/s3)
       const source = dir.startsWith("systems") || dir.startsWith("modules") || dir.startsWith("icons")
         ? "public"
         : "data";
 
-      const result = await FilePicker.browse(source, dir);
-      return result.files.some(f => f.endsWith(filename));
+      const result = await FilePicker.browse(source, decode(dir));
+      return result.files.some(f => decode(f.split("/").pop().split(/[?#]/)[0]) === target);
     } catch (e) {
       return false;
     }

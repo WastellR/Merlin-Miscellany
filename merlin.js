@@ -2193,7 +2193,10 @@ class Merlin extends Hexcrawl{
 
     const identifier = merlinFlags.teleportIdentifier;
     const destinations = Array.from(this.teleportTileIds[identifier] ?? []);
-    if (destinations.length === 0) return;
+    if (destinations.length === 0) {
+      console.warn(`Merlin | No teleport destination tiles found for identifier "${identifier}"`);
+      return;
+    }
 
     // Make sure we don't select the tile we are already on, if there are other options
     const checkedIndexes = new Set();
@@ -2208,7 +2211,10 @@ class Merlin extends Hexcrawl{
       [sceneId, tileId] = destinations[randomIndex].split(":");
       if (tileId !== tile.document._id) break;
     }
-    if(tileId === tile.document._id || !sceneId || !tileId) return;
+    if(tileId === tile.document._id || !sceneId || !tileId) {
+      console.warn("Merlin | No teleport destination other than the tile itself");
+      return;
+    }
 
     if (!merlinFlags.relativeLocation) {
       this.teleportTokenToTile(tile.document.parent._id, sceneId, tileId, token.document._id);
@@ -3049,7 +3055,7 @@ class Merlin extends Hexcrawl{
     const targetScene = game.scenes.get(targetSceneId);
     const targetTile = targetScene.tiles.get(targetTileId);
     let snapped = this.getSnappedPosition(targetTile, targetScene);
-    
+
     this.#teleportTokenToPosition(sourceSceneId,targetSceneId, snapped, tokenId);
   }
 
@@ -3058,20 +3064,20 @@ class Merlin extends Hexcrawl{
     const sourceTile = sourceScene.tiles.get(sourceTileId);
     const targetScene = game.scenes.get(targetSceneId);
     const targetTile = targetScene.tiles.get(targetTileId);
-    const token = sourceScene.tokens.get(tokenId);
     const prevMovement = this.prevMovementMap.get(tokenId);
 
     let relativeX = (prevMovement.destination.x - sourceTile.x) * (targetTile.width / sourceTile.width);
     let relativeY = (prevMovement.destination.y - sourceTile.y) * (targetTile.height / sourceTile.height);
     const snapped = this.getSnappedPosition({x: targetTile.x + relativeX, y: targetTile.y + relativeY}, targetScene);
-    
+
     this.#teleportTokenToPosition(sourceSceneId,targetSceneId, snapped, tokenId);
   }
 
   getSnappedPosition(targetTile, targetScene){
-    // Not sure when this was deprecated but 14 seems like a good guess.
-    if(game.version >= 14){
-      return targetScene.grid.getSnappedPoint({x: targetTile.x - 1, y: targetTile.y - 1}, {mode: CONST.GRID_SNAPPING_MODES.TOP_LEFT_CORNER, resolution: 1});      
+    // getSnappedPosition was deprecated in v12, and throws if Foundry's compatibility mode is strict, so only use it
+    // on versions old enough not to have getSnappedPoint
+    if(targetScene.grid.getSnappedPoint){
+      return targetScene.grid.getSnappedPoint({x: targetTile.x - 1, y: targetTile.y - 1}, {mode: CONST.GRID_SNAPPING_MODES.TOP_LEFT_CORNER, resolution: 1});
     }
     else{
       return targetScene.grid.getSnappedPosition(targetTile.x, targetTile.y, 1);
@@ -3081,9 +3087,11 @@ class Merlin extends Hexcrawl{
   async #teleportTokenToPosition(sourceSceneId, targetSceneId, targetPosition, tokenId) {
     // Checks to stop teleporting on arrival loops
     if(this.teleportingTokenIds.has(tokenId)){
+      console.warn(`Merlin | Ignoring teleport of token ${tokenId}: a teleport is already in progress for it`);
       return;
     }    
     if(this.teleportedTokenIds.has(tokenId)){
+      console.warn(`Merlin | Ignoring teleport of token ${tokenId}: it has only just arrived and hasn't moved yet`);
       return;
     }
     this.teleportingTokenIds.add(tokenId);
@@ -3101,13 +3109,17 @@ class Merlin extends Hexcrawl{
     // (width/height are in grid units, so they must not be subtracted from pixel positions.)
     duplToken.x = Math.round(targetPosition.x);
     duplToken.y = Math.round(targetPosition.y);
-    
     const created = await targetScene.createEmbeddedDocuments("Token", [duplToken]);
     const createdId = created[0]._id;
 
     // For any users controlling the original token, pull them to the new scene (if any) + grab the new token
-    const actor = game.actors.get(duplToken.actorId);
+    // The token's own actor also covers unlinked tokens, which game.actors doesn't know about
+    const actor = token.actor ?? game.actors.get(duplToken.actorId);
     const owners = actor ? game.users.filter(u => actor.testUserPermission(u, "OWNER")) : [];
+    // A GM controlling the token is pulled along even when the token has no actor to work out ownership from
+    if(game.user.isGM && this.GMControlledTokenIds.has(tokenId) && !owners.includes(game.user)){
+      owners.push(game.user);
+    }
     await owners.forEach(user => {
       if(!(user.isGM && !this.GMControlledTokenIds.has(tokenId))){
         if(user.viewedScene !== targetScene.id){

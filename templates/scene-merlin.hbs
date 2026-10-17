@@ -1,0 +1,142 @@
+<div class="tab scrollable{{#if tab.active}} active{{/if}}" data-group="{{tab.group}}" data-tab="{{tab.id}}">
+
+    <div class="form-group">
+        <label for="{{rootId}}-merlin-stableId">Stable ID</label>
+        <div class="form-fields">
+            <input id="{{rootId}}-merlin-stableId" type="text" name="merlinScene.stableId" value="{{merlin.stableId}}" />
+        </div>
+        <p class="hint">Lets other scenes refer to this one in a way that survives importing it.</p>
+    </div>
+    <div class="form-group">
+        <label>Fog Mask</label>
+        <div class="form-fields">
+            <file-picker name="merlinScene.fogMask" type="image" value="{{merlin.fogMask}}"></file-picker>
+        </div>
+        <p class="hint">White areas start explored for every user; black areas stay unexplored.</p>
+    </div>
+    <fieldset>        
+        <legend>Merlin</legend>
+        <p class="hint">Which Merlin package, level and camera this scene is rendered from.</p>
+        <div class="form-group">
+            <label for="{{rootId}}-merlin-package">Package</label>
+            <div class="form-fields">
+                <input id="{{rootId}}-merlin-package" type="text" name="merlinScene.merlinPackageId"
+                       value="{{merlin.merlinPackageId}}" list="{{rootId}}-merlin-packages" />
+                <datalist id="{{rootId}}-merlin-packages">
+                    {{#each merlin.packages as |package|}}<option value="{{package}}"></option>{{/each}}
+                </datalist>
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="{{rootId}}-merlin-level">Level</label>
+            <div class="form-fields">
+                <input id="{{rootId}}-merlin-level" type="text" name="merlinScene.merlinLevelId" value="{{merlin.merlinLevelId}}" />
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="{{rootId}}-merlin-camera">Camera</label>
+            <div class="form-fields">
+                <input id="{{rootId}}-merlin-camera" type="text" name="merlinScene.merlinCameraId" value="{{merlin.merlinCameraId}}" />
+            </div>
+        </div>        
+    </fieldset>
+
+    <fieldset>
+        <legend>Parent Scene</legend>
+        <p class="hint">Zooming out far enough, or using the parent scene button, returns to the parent scene.</p>        
+        <div class="form-group">
+            <label for="{{rootId}}-merlin-parent">Parent Scene</label>
+            <div class="form-fields">
+                <select id="{{rootId}}-merlin-parent" name="merlinScene.parentSceneId">
+                    <option value="">None</option>
+                    {{#each merlin.parentOptions as |option|}}
+                    <option value="{{option.value}}" {{#if option.selected}}selected{{/if}}>{{option.label}}</option>
+                    {{/each}}
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>View in Parent</label>
+            <div class="form-fields">
+                <label for="{{rootId}}-merlin-view-x">X</label>
+                <input id="{{rootId}}-merlin-view-x" type="number" step="any" name="merlinScene.parentSceneView.x" value="{{merlin.parentView.x}}" />
+                <label for="{{rootId}}-merlin-view-y">Y</label>
+                <input id="{{rootId}}-merlin-view-y" type="number" step="any" name="merlinScene.parentSceneView.y" value="{{merlin.parentView.y}}" />
+                <label for="{{rootId}}-merlin-view-scale">Scale</label>
+                <input id="{{rootId}}-merlin-view-scale" type="number" step="any" name="merlinScene.parentSceneView.scale" value="{{merlin.parentView.scale}}" />
+            </div>
+            <p class="hint">Where to pan to in the parent scene. Leave blank to keep its current view.</p>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Rain Overlays</legend>
+        <p class="hint">Images or videos shown over the whole scene, one file path per line.</p>
+        <div class="form-group stacked">
+            <label for="{{rootId}}-merlin-rain-none">No rain</label>
+            <textarea id="{{rootId}}-merlin-rain-none" name="merlinScene.rain.noRain" rows="2">{{merlin.rain.noRain}}</textarea>
+        </div>
+        <div class="form-group stacked">
+            <label for="{{rootId}}-merlin-rain-light">Light rain</label>
+            <textarea id="{{rootId}}-merlin-rain-light" name="merlinScene.rain.light" rows="2">{{merlin.rain.light}}</textarea>
+        </div>
+        <div class="form-group stacked">
+            <label for="{{rootId}}-merlin-rain-heavy">Heavy rain</label>
+            <textarea id="{{rootId}}-merlin-rain-heavy" name="merlinScene.rain.heavy" rows="2">{{merlin.rain.heavy}}</textarea>
+        </div>
+    </fieldset>
+
+    <fieldset>
+        <legend>Temperature</legend>
+        <p class="hint">A colour tint over the whole scene and/or overlays (one file path per line) for each temperature. Normal is the default.</p>
+        {{#each merlin.temperatures as |temperature|}}
+        <fieldset>
+            <legend>{{temperature.label}}</legend>
+            <div class="form-group">
+                <label for="{{@root.rootId}}-merlin-temp-{{temperature.id}}-tint">Tint</label>
+                <div class="form-fields">
+                    <input id="{{@root.rootId}}-merlin-temp-{{temperature.id}}-tint" type="checkbox"
+                           name="merlinScene.temperature.{{temperature.id}}.tint" {{checked temperature.tintEnabled}} />
+                    <input type="color" name="merlinScene.temperature.{{temperature.id}}.color" value="{{temperature.color}}" />
+                    <label for="{{@root.rootId}}-merlin-temp-{{temperature.id}}-alpha">Opacity</label>
+                    <input id="{{@root.rootId}}-merlin-temp-{{temperature.id}}-alpha" type="number" min="0" max="1" step="0.05"
+                           name="merlinScene.temperature.{{temperature.id}}.alpha" value="{{temperature.alpha}}" />
+                </div>
+            </div>
+            <div class="form-group stacked">
+                <label for="{{@root.rootId}}-merlin-temp-{{temperature.id}}-overlays">Overlays</label>
+                <textarea id="{{@root.rootId}}-merlin-temp-{{temperature.id}}-overlays"
+                          name="merlinScene.temperature.{{temperature.id}}.overlays" rows="2">{{temperature.overlays}}</textarea>
+            </div>
+        </fieldset>
+        {{/each}}
+    </fieldset>
+
+    <fieldset>
+        <legend>Hexcrawl</legend>
+        <div class="form-group">
+            <label for="{{rootId}}-merlin-hexcrawl">Hexcrawl scene</label>
+            <div class="form-fields">
+                <input id="{{rootId}}-merlin-hexcrawl" type="checkbox" name="merlinScene.hexcrawl" {{checked merlin.hexcrawl}} />
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="{{rootId}}-merlin-climate">Climate</label>
+            <div class="form-fields">
+                <select id="{{rootId}}-merlin-climate" name="merlinScene.hexcrawlClimate">
+                    {{#each merlin.climateOptions as |option|}}
+                    <option value="{{option.value}}" {{#if option.selected}}selected{{/if}}>{{option.label}}</option>
+                    {{/each}}
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Terrain Map</label>
+            <div class="form-fields">
+                <file-picker name="merlinScene.hexcrawlTerrain" type="image" value="{{merlin.hexcrawlTerrain}}"></file-picker>
+            </div>
+            <p class="hint">The image whose pixel colours give the terrain under the cursor.</p>
+        </div>
+    </fieldset>
+
+</div>

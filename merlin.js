@@ -1,4 +1,5 @@
 import { Hexcrawl, registerHexcrawlSettings } from "./hexcrawl.js";
+import { createMerlinSceneConfig } from "./sceneconfig.js";
 
 // Zoomed in, Merlin renders only the part of the scene we're looking at (see _updateMerlinView).
 // How long after asking Merlin for a new part to wait before showing the stream as that part, while its frames catch up
@@ -147,6 +148,7 @@ class Merlin extends Hexcrawl{
     Hooks.on("updateToken", this._onUpdateToken.bind(this));
     Hooks.on("getSceneControlButtons", this._getSceneControlButtons.bind(this));
     Hooks.on("updateTile", this._onUpdateTile.bind(this));
+    Hooks.on("updateScene", this._onUpdateScene.bind(this));
     Hooks.on("hoverTile", this._onHoverTile.bind(this));
     Hooks.on("renderSettings", this._onRenderSettings.bind(this));
     Hooks.on("renderPlayers", () => this._positionMerlinStatusWidget());
@@ -1526,6 +1528,10 @@ class Merlin extends Hexcrawl{
 
     // Extend Foundry's base tile sheet class with our custom class
     CONFIG.Tile.sheetClasses.base['core.TileConfig'].cls = MerlinTileConfig;
+
+    // Add a Merlin tab to the scene config
+    const sceneSheet = CONFIG.Scene.sheetClasses.base['core.SceneConfig'];
+    sceneSheet.cls = createMerlinSceneConfig(sceneSheet.cls, MERLIN_TEMPERATURES);
 
     this._bindMerlinDocumentClickListener();
 
@@ -3324,6 +3330,16 @@ class Merlin extends Hexcrawl{
   _describeTemperatureTool(tool, current = "normal") {
     tool.icon = `fas ${MERLIN_TEMPERATURES[current]?.icon ?? "fa-temperature-half"}`;
     tool.title = `Temperature: ${MERLIN_TEMPERATURES[current]?.label ?? current}`;
+  }
+
+  // The rain and temperature overlays are loaded when the scene controls are built, so rebuild them when those flags change
+  _onUpdateScene(scene, changes) {
+    if (scene.id !== canvas.scene?.id) return;
+    const merlinChanges = changes.flags?.merlin;
+    if (!merlinChanges) return;
+    const overlayFlag = /^(-=|==)?(temperatureTints|temperatureOverlays|rainOverlays)$/;
+    if (!Object.keys(merlinChanges).some(key => overlayFlag.test(key))) return;
+    ui.controls.render({ reset: true });
   }
 
   _clearTemperature() {

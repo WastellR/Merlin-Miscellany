@@ -129,6 +129,7 @@ class Merlin extends Hexcrawl{
     Hooks.on("ready", this._onReady.bind(this));
     Hooks.on("canvasReady", this._onCanvasReady.bind(this));
     Hooks.on("canvasPan", this._onCanvasPan.bind(this));
+    Hooks.on("canvasPan", () => this._updateTileCaptionResolution());
     Hooks.on("renderSceneNavigation", this._onRenderSceneNavigation.bind(this));
     Hooks.on("updateAmbientLight", this._onUpdateLight.bind(this));
     Hooks.on("updateWall", this._onUpdateWall.bind(this));
@@ -1856,7 +1857,9 @@ class Merlin extends Hexcrawl{
       dropShadow: true,
       dropShadowColor: "#000000",
       dropShadowBlur: 2,
-      dropShadowDistance: 0
+      dropShadowDistance: 0,
+      // The canvas is sized to the text's advance width, so wide glyphs (e.g. W) and the shadow get clipped at the edges without this
+      padding: Math.max(4, Math.ceil(captionFontSize * 0.25))
     });
 
     text.anchor.set(0.5, 0);
@@ -1868,10 +1871,22 @@ class Merlin extends Hexcrawl{
 
     parent.addChild(text);
     this.tileCaption = text;
+    this._updateTileCaptionResolution(true);
     this.tileCaptionTileId = tile.id;
     this.tileCaptionText = caption;
     this.tileCaptionFont = captionFont;
     this.tileCaptionFontSize = captionFontSize;
+  }
+
+  // Text is rasterized once, at a fixed resolution, but sits in the zoomable canvas. Match its resolution to the on-screen
+  // scale (zoom * display pixel ratio) so it stays sharp, and only re-rasterize when the scale has changed noticeably.
+  _updateTileCaptionResolution(force = false) {
+    const text = this.tileCaption;
+    if (!text || text.destroyed) return;
+    const scale = (canvas?.stage?.scale?.x ?? 1) * (window.devicePixelRatio || 1);
+    const wanted = Math.min(Math.max(scale, 1), 6);
+    if (!force && Math.abs(wanted - text.resolution) / text.resolution < 0.2) return;
+    text.resolution = wanted;
   }
 
   _hideTileCaption() {

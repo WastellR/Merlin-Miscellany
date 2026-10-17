@@ -421,6 +421,9 @@ export class Hexcrawl {
     desiredBackgroundInfo.wind = "none";
     if(wind == "b") desiredBackgroundInfo.wind = "wind";
     else if(wind == "c") desiredBackgroundInfo.wind = "highWind";
+    desiredBackgroundInfo.temperature = "normal";
+    if(temperature == "b") desiredBackgroundInfo.temperature = "cold";
+    else if(temperature == "c") desiredBackgroundInfo.temperature = "hot";
 
     if(this._updateBackground(desiredBackgroundInfo)){
       this.sceneMerlinTime[canvas.scene.id] = desiredBackgroundInfo.time;

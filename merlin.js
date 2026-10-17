@@ -27,6 +27,15 @@ const MERLIN_VIEW_WHOLE_FRACTION = 0.95;
 const MERLIN_QUALITY_LABELS = ["Low", "Medium", "High", "Epic", "Cinematic"];
 const MERLIN_OFF_QUALITY_LABELS = ["Off", "Low", "Medium", "High", "Epic", "Cinematic"];
 const MERLIN_POST_PROCESSING_LABELS = ["Low", "Medium", "High", "Very High", "Highest"];
+// Temperature presets, coolest to hottest
+const MERLIN_TEMPERATURES = {
+  freezing: { label: "Freezing", icon: "fa-snowflake", alpha: 0.3 },
+  cold: { label: "Cold", icon: "fa-temperature-low", alpha: 0.2 },
+  normal: { label: "Normal", icon: "fa-temperature-half", alpha: 0.2 },
+  hot: { label: "Hot", icon: "fa-temperature-high", alpha: 0.2 },
+  boiling: { label: "Boiling", icon: "fa-fire", alpha: 0.3 }
+};
+
 // The sliders in Merlin's video settings window, in order: [name Merlin knows it by, label, highest value, value names, values].
 // Where values is given, the slider's positions stand for those values in Merlin rather than for 0, 1, 2...
 const MERLIN_VIDEO_SLIDERS = [
@@ -2319,6 +2328,7 @@ class Merlin extends Hexcrawl{
   sceneMerlinRain = {};
   sceneMerlinWind = {};
   sceneMerlinTime = {};
+  sceneMerlinTemperature = {};
   // Map of keys to filenames
   sceneBackgroundFilenames = {};
   sceneForegroundFilenames = {};
@@ -2483,6 +2493,9 @@ class Merlin extends Hexcrawl{
       }
     }
 
+    // Get any temperature tints/overlays, set by the scene flags merlin.temperatureTints and merlin.temperatureOverlays
+    await this._loadSceneTemperatureConfig();
+
     // Create a mapping of fallback foregrounds for each background, prioritizing same weather and time, then same time, then same weather, then any
     if(Object.keys(this.sceneForegroundFilenames).length > 1){
       let sceneForegroundFallbacks = {};
@@ -2549,6 +2562,7 @@ class Merlin extends Hexcrawl{
       desiredBackgroundInfo.rain = this.globalMerlinRain;
       desiredBackgroundInfo.wind = this.globalMerlinWind;
       desiredBackgroundInfo.time = this.globalMerlinTime;
+      desiredBackgroundInfo.temperature = this.globalMerlinTemperature || "normal";
     }
     else{
       if(!this.sceneMerlinRain[canvas.scene.id]){
@@ -2563,6 +2577,7 @@ class Merlin extends Hexcrawl{
       desiredBackgroundInfo.rain = this.sceneMerlinRain[canvas.scene.id];
       desiredBackgroundInfo.wind = this.sceneMerlinWind[canvas.scene.id];
       desiredBackgroundInfo.time = this.sceneMerlinTime[canvas.scene.id];
+      desiredBackgroundInfo.temperature = this.sceneMerlinTemperature[canvas.scene.id] ?? "normal";
     }
     desiredBackgroundInfo.isVideo = this.usersUseMerlinVideo[game.userId] ?? backgroundInfo.isVideo;
     // Attempt to switch to it if we have a suitable background, else fall back to the current background
@@ -2666,6 +2681,26 @@ class Merlin extends Hexcrawl{
         }
       };
       controls.lighting.tools[windSelect.name] = windSelect;
+    }
+
+    const temperatureStates = this._getAvailableTemperatures();
+    if(temperatureStates.length > 1) {
+      const temperatureSelect = {
+        name: "selectMerlinTemperature",
+        button: true,
+        onChange: () => {
+          // Foundry only builds these controls once, so work out the next state now rather than when they were built
+          const next = this._getNextTemperature(temperatureStates, this.currentBackgroundInfo.temperature);
+          let desiredBackgroundInfo = {...this.currentBackgroundInfo};
+          desiredBackgroundInfo.temperature = next;
+          console.log("Merlin | Switching temperature to: " + next);
+          this._updateBackground(desiredBackgroundInfo);
+          this._describeTemperatureTool(temperatureSelect, next);
+          ui.controls.render();
+        }
+      };
+      this._describeTemperatureTool(temperatureSelect, this.currentBackgroundInfo.temperature);
+      controls.lighting.tools[temperatureSelect.name] = temperatureSelect;
     }
 
     // Refresh controls UI after background reload.
@@ -2920,6 +2955,9 @@ class Merlin extends Hexcrawl{
     }
     this.displayOverlays(newRainOverlays);
 
+    // Temperature is applied locally by every client; it has its own layer so rain changes don't clear it
+    this._applyTemperature(backgroundInfo.temperature ?? "normal");
+
     // Update background, fallback to nearby weather variants if needed
     let targetKey = this._getKeyFromBackgroundInfo(backgroundInfo);
     let bChangedBG = false;
@@ -2974,6 +3012,7 @@ class Merlin extends Hexcrawl{
     this.sceneMerlinTime[canvas.scene.id] = backgroundInfo.time;
     this.sceneMerlinRain[canvas.scene.id] = backgroundInfo.rain;
     this.sceneMerlinWind[canvas.scene.id] = backgroundInfo.wind;
+    this.sceneMerlinTemperature[canvas.scene.id] = backgroundInfo.temperature ?? "normal";
     if(this.globalMerlinWeatherEnabled){
       this.globalMerlinTime = backgroundInfo.time;
       this.globalMerlinRain = backgroundInfo.rain;
@@ -2981,6 +3020,8 @@ class Merlin extends Hexcrawl{
       game.settings.set("merlins-miscellany", "globalMerlinRain", this.globalMerlinRain);
       game.settings.set("merlins-miscellany", "globalMerlinWind", this.globalMerlinWind);
       game.settings.set("merlins-miscellany", "globalMerlinTime", this.globalMerlinTime);
+      this.globalMerlinTemperature = backgroundInfo.temperature ?? "normal";
+      game.settings.set("merlins-miscellany", "globalMerlinTemperature", this.globalMerlinTemperature);
     }
     return bChangedBG;
   }
@@ -3184,6 +3225,117 @@ class Merlin extends Hexcrawl{
       }
   }
 
+  // The temperature presets, coolest to hottest, and their default tint
+  // Scene flags: merlin.temperatureTints = { freezing: "#8ec5ff" | { color: "#8ec5ff", alpha: 0.3 }, ... }
+  //              merlin.temperatureOverlays = { freezing: ["path/to/overlay.webm"], ... }
+  // The normal preset is the default and always available.
+  sceneTemperatureConfig = { tints: {}, overlays: {} };
+  temperatureLayer = [];
+  _temperatureApplyId = 0;
+
+  async _loadSceneTemperatureConfig() {
+    const config = { tints: {}, overlays: {} };
+    const tintFlags = canvas.scene.flags?.merlin?.temperatureTints ?? {};
+    const overlayFlags = canvas.scene.flags?.merlin?.temperatureOverlays ?? {};
+    for (const preset of Object.keys(MERLIN_TEMPERATURES)) {
+      const tint = tintFlags[preset];
+      const color = typeof tint === "string" ? tint : tint?.color;
+      if (color) {
+        const alpha = Number(tint?.alpha ?? MERLIN_TEMPERATURES[preset].alpha);
+        config.tints[preset] = { color, alpha: Number.isFinite(alpha) ? Math.clamp(alpha, 0, 1) : MERLIN_TEMPERATURES[preset].alpha };
+      }
+      const files = [];
+      for (const file of [].concat(overlayFlags[preset] ?? [])) {
+        if (file && await this.assetExists(file)) files.push(file);
+      }
+      if (files.length > 0) config.overlays[preset] = files;
+    }
+    this.sceneTemperatureConfig = config;
+  }
+
+  // Presets this scene defines something for, always including normal
+  _getAvailableTemperatures() {
+    const { tints, overlays } = this.sceneTemperatureConfig;
+    return Object.keys(MERLIN_TEMPERATURES).filter(preset => preset === "normal" || tints[preset] || overlays[preset]);
+  }
+
+  async _applyTemperature(preset) {
+    const applyId = ++this._temperatureApplyId;
+    this._clearTemperature();
+    if (!canvas.ready) return;
+
+    const tint = this.sceneTemperatureConfig.tints[preset];
+    const files = this.sceneTemperatureConfig.overlays[preset] ?? [];
+    const { sceneX, sceneY, sceneWidth, sceneHeight } = canvas.dimensions;
+    const added = [];
+
+    if (tint) {
+      // A tinted white sprite rather than Graphics, as the Graphics API differs between PIXI versions
+      const tintSprite = new PIXI.Sprite(PIXI.Texture.WHITE);
+      tintSprite.tint = foundry.utils.Color.from(tint.color).valueOf();
+      tintSprite.alpha = tint.alpha;
+      tintSprite.position.set(sceneX, sceneY);
+      tintSprite.width = sceneWidth;
+      tintSprite.height = sceneHeight;
+      added.push(tintSprite);
+    }
+
+    for (const file of files) {
+      let sprite;
+      try {
+        if (/\.(mp4|webm|ogg|mov)$/i.test(file)) {
+          const video = document.createElement("video");
+          video.src = file;
+          video.loop = true;
+          video.muted = true;
+          video.autoplay = true;
+          video.playsInline = true;
+          await video.play();
+          sprite = new PIXI.Sprite(PIXI.Texture.from(video));
+        } else {
+          sprite = PIXI.Sprite.from(file);
+        }
+      } catch (err) {
+        console.warn(`Merlin | Could not load temperature overlay ${file}:`, err);
+        continue;
+      }
+      sprite.position.set(sceneX, sceneY);
+      sprite.width = sceneWidth;
+      sprite.height = sceneHeight;
+      added.push(sprite);
+    }
+
+    // A newer call (or a scene change) has superseded this one while the files were loading
+    if (applyId !== this._temperatureApplyId || !canvas.ready) {
+      for (const obj of added) obj.destroy({ children: true });
+      return;
+    }
+    for (const obj of added) {
+      canvas.interface.addChild(obj);
+      this.temperatureLayer.push(obj);
+    }
+  }
+
+  _getNextTemperature(states, current) {
+    return states[(states.indexOf(current ?? "normal") + 1) % states.length];
+  }
+
+  // Sets the button's icon and title to show the current temperature
+  _describeTemperatureTool(tool, current = "normal") {
+    tool.icon = `fas ${MERLIN_TEMPERATURES[current]?.icon ?? "fa-temperature-half"}`;
+    tool.title = `Temperature: ${MERLIN_TEMPERATURES[current]?.label ?? current}`;
+  }
+
+  _clearTemperature() {
+    for (const obj of this.temperatureLayer) {
+      if (obj && !obj.destroyed) {
+        obj.parent?.removeChild(obj);
+        obj.destroy({ children: true });
+      }
+    }
+    this.temperatureLayer = [];
+  }
+
   overlays = [];
   displayOverlays(filepaths) {    
     game.socket.emit("module.merlins-miscellany", {
@@ -3332,10 +3484,28 @@ Hooks.once("init", () => {
     type: String,
     default: ""
   });
+  game.settings.register("merlins-miscellany", "globalMerlinTemperature", {
+    name: "Global Merlin Temperature String",
+    hint: "Current temperature to use for all Merlin scenes.",
+    scope: "world",
+    config: false,
+    type: String,
+    default: "",
+    onChange: (value) => {
+      // Keep other clients in step when the GM changes the temperature
+      const merlin = game.merlin;
+      if (!merlin?.globalMerlinWeatherEnabled || !canvas?.ready || !value || value === merlin.globalMerlinTemperature) return;
+      merlin.globalMerlinTemperature = value;
+      merlin.currentBackgroundInfo = { ...merlin.currentBackgroundInfo, temperature: value };
+      merlin._applyTemperature(value);
+      ui.controls?.render();
+    }
+  });
   game.merlin.globalMerlinWeatherEnabled = game.settings.get("merlins-miscellany", "globalMerlinWeatherEnabled");
   game.merlin.globalMerlinRain = game.settings.get("merlins-miscellany", "globalMerlinRain");
   game.merlin.globalMerlinWind = game.settings.get("merlins-miscellany", "globalMerlinWind");
   game.merlin.globalMerlinTime = game.settings.get("merlins-miscellany", "globalMerlinTime");
+  game.merlin.globalMerlinTemperature = game.settings.get("merlins-miscellany", "globalMerlinTemperature");
 
   registerHexcrawlSettings(game);
 });

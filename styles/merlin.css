@@ -91,7 +91,8 @@
 }
 
 /* Merlin video settings window */
-#merlin-settings {
+#merlin-settings,
+#merlin-weather {
     position: fixed;
     top: 80px;
     left: calc(50% - 200px);
@@ -109,7 +110,8 @@
     font-size: 14px;
 }
 
-#merlin-settings .merlin-settings-header {
+#merlin-settings .merlin-settings-header,
+#merlin-weather .merlin-settings-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -120,16 +122,20 @@
     user-select: none;
 }
 
-#merlin-settings .merlin-settings-close { cursor: pointer; color: #bbb; }
-#merlin-settings .merlin-settings-close:hover { color: #fff; }
+#merlin-settings .merlin-settings-close,
+#merlin-weather .merlin-settings-close { cursor: pointer; color: #bbb; }
+#merlin-settings .merlin-settings-close:hover,
+#merlin-weather .merlin-settings-close:hover { color: #fff; }
 
-#merlin-settings .merlin-settings-body {
+#merlin-settings .merlin-settings-body,
+#merlin-weather .merlin-settings-body {
     flex: 1;
     overflow-y: auto;
     padding: 4px 10px 8px;
 }
 
-#merlin-settings h4 {
+#merlin-settings h4,
+#merlin-weather h4 {
     margin: 10px 0 4px;
     padding-bottom: 2px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.15);
@@ -138,7 +144,8 @@
     text-transform: uppercase;
 }
 
-#merlin-settings .merlin-settings-row {
+#merlin-settings .merlin-settings-row,
+#merlin-weather .merlin-settings-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -146,34 +153,42 @@
     min-height: 28px;
 }
 
-#merlin-settings .merlin-settings-row > label { flex: 0 0 150px; }
-#merlin-settings .merlin-settings-row > select { flex: 1; }
+#merlin-settings .merlin-settings-row > label,
+#merlin-weather .merlin-settings-row > label { flex: 0 0 150px; }
+#merlin-settings .merlin-settings-row > select,
+#merlin-weather .merlin-settings-row > select { flex: 1; }
 
-#merlin-settings .merlin-settings-slider {
+#merlin-settings .merlin-settings-slider,
+#merlin-weather .merlin-settings-slider {
     flex: 1;
     display: flex;
     align-items: center;
     gap: 4px;
 }
 
-#merlin-settings .merlin-settings-slider input[type=range] { flex: 1; min-width: 0; }
-#merlin-settings .merlin-settings-slider button {
+#merlin-settings .merlin-settings-slider input[type=range],
+#merlin-weather .merlin-settings-slider input[type=range] { flex: 1; min-width: 0; }
+#merlin-settings .merlin-settings-slider button,
+#merlin-weather .merlin-settings-slider button {
     flex: 0 0 22px;
     width: 22px;
     height: 22px;
     padding: 0;
     line-height: 20px;
 }
-#merlin-settings .merlin-settings-value { flex: 0 0 62px; text-align: right; }
+#merlin-settings .merlin-settings-value,
+#merlin-weather .merlin-settings-value { flex: 0 0 62px; text-align: right; }
 
-#merlin-settings .merlin-settings-check {
+#merlin-settings .merlin-settings-check,
+#merlin-weather .merlin-settings-check {
     display: flex;
     align-items: center;
     gap: 6px;
     min-height: 26px;
 }
 
-#merlin-settings .merlin-settings-footer {
+#merlin-settings .merlin-settings-footer,
+#merlin-weather .merlin-settings-footer {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -182,7 +197,8 @@
     border-top: 1px solid rgba(255, 255, 255, 0.15);
 }
 
-#merlin-settings .merlin-settings-level {
+#merlin-settings .merlin-settings-level,
+#merlin-weather .merlin-settings-level {
     flex: 1;
     min-width: 0;
     white-space: nowrap;
@@ -190,9 +206,11 @@
     text-overflow: ellipsis;
 }
 
-#merlin-settings button:disabled { opacity: 0.4; cursor: default; }
+#merlin-settings button:disabled,
+#merlin-weather button:disabled { opacity: 0.4; cursor: default; }
 
-#merlin-settings .merlin-settings-advanced-toggle {
+#merlin-settings .merlin-settings-advanced-toggle,
+#merlin-weather .merlin-settings-advanced-toggle {
     display: block;
     margin: 10px 0 4px;
     padding-bottom: 2px;
@@ -204,8 +222,35 @@
     user-select: none;
 }
 
-#merlin-settings .merlin-settings-advanced-toggle:hover { color: #fff; }
-#merlin-settings .merlin-settings-advanced-toggle i { width: 12px; }
-#merlin-settings .merlin-settings-advanced[hidden] { display: none; }
-#merlin-settings .merlin-settings-checks { margin-top: 6px; }
-#merlin-settings .merlin-settings-footer button { flex: 0 0 auto; width: auto; padding: 0 10px; }
+#merlin-settings .merlin-settings-advanced-toggle:hover,
+#merlin-weather .merlin-settings-advanced-toggle:hover { color: #fff; }
+#merlin-settings .merlin-settings-advanced-toggle i,
+#merlin-weather .merlin-settings-advanced-toggle i { width: 12px; }
+#merlin-settings .merlin-settings-advanced[hidden],
+#merlin-weather .merlin-settings-advanced[hidden] { display: none; }
+#merlin-settings .merlin-settings-checks,
+#merlin-weather .merlin-settings-checks { margin-top: 6px; }
+#merlin-settings .merlin-settings-footer button,
+#merlin-weather .merlin-settings-footer button { flex: 0 0 auto; width: auto; padding: 0 10px; }
+
+/* Weather button, beside the Merlin status icon */
+#merlin-status .merlin-status-weather {
+    width: 20px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ddddddaa;
+    font-size: 16px;
+    cursor: pointer;
+    pointer-events: all;
+    transition: color 0.15s;
+}
+
+#merlin-status .merlin-status-weather[hidden] { display: none; }
+#merlin-status .merlin-status-weather:hover { color: #fff; }
+
+#merlin-weather { left: calc(50% + 220px); }
+#merlin-weather [hidden] { display: none; }
+#merlin-weather .merlin-weather-none { padding: 8px 0; color: #aaa; }
+#merlin-weather .merlin-settings-value { flex: 0 0 82px; }

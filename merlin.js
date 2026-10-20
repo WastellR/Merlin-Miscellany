@@ -24,6 +24,9 @@ const MERLIN_VIEW_SETTLED_MAX_OVERSIZE = 1.3;
 // With this much of the scene's width and height on screen, Merlin just renders the whole image
 const MERLIN_VIEW_WHOLE_FRACTION = 0.95;
 
+// The weather window's sliders, by the name Merlin knows them by, with how many steps each has
+const MERLIN_WEATHER_STEPS = { timeOfDay: 288, rain: 100, windStrength: 100 };
+
 // Value names for the levels of Merlin's video settings
 const MERLIN_QUALITY_LABELS = ["Low", "Medium", "High", "Epic", "Cinematic"];
 const MERLIN_OFF_QUALITY_LABELS = ["Off", "Low", "Medium", "High", "Epic", "Cinematic"];
@@ -240,7 +243,10 @@ class Merlin extends Hexcrawl{
     this.merlinStatus = status;
     console.log(`Merlin | Merlin status: ${status ?? "not running"}`);
     // The settings window is only for a live link, however the link ended
-    if (status !== "linked") this._closeMerlinSettings();
+    if (status !== "linked") {
+      this._closeMerlinSettings();
+      this._closeMerlinWeather();
+    }
   }
 
   // The merlin.merlinPackageId / merlin.merlinLevelId flags identify which Merlin package and level a scene corresponds to.
@@ -920,6 +926,7 @@ class Merlin extends Hexcrawl{
       widget.id = "merlin-status";
       widget.innerHTML = `
         <div class="merlin-status-icon"><i class="fa-solid fa-hat-wizard"></i></div>
+        <div class="merlin-status-weather" data-tooltip="Merlin Weather" data-tooltip-direction="UP" hidden><i class="fa-solid fa-cloud-sun-rain"></i></div>
         <div class="merlin-status-details">
           <div class="merlin-status-bar"><div class="merlin-status-bar-fill"></div></div>
           <div class="merlin-status-line merlin-status-downloading"></div>
@@ -929,6 +936,9 @@ class Merlin extends Hexcrawl{
       // The settings are only available once linked
       widget.querySelector(".merlin-status-icon").addEventListener("click", () => {
         if (this.merlinStatus === "linked") this._toggleMerlinSettings();
+      });
+      widget.querySelector(".merlin-status-weather").addEventListener("click", () => {
+        if (this.merlinStatus === "linked") this._toggleMerlinWeather();
       });
       document.documentElement.appendChild(widget);
     }
@@ -987,8 +997,14 @@ class Merlin extends Hexcrawl{
     widget.classList.toggle("has-details", linked && (busy || !!info.waitingForPatreonLogin || !!error));
 
     // The settings window is only for a live link
-    if (linked) this._updateMerlinSettingsLevel();
-    else this._closeMerlinSettings();
+    widget.querySelector(".merlin-status-weather").hidden = !linked;
+    if (linked) {
+      this._updateMerlinSettingsLevel();
+      this._onMerlinLevelMaybeChanged();
+    } else {
+      this._closeMerlinSettings();
+      this._closeMerlinWeather();
+    }
 
     this._positionMerlinStatusWidget();
   }
@@ -1225,6 +1241,190 @@ class Merlin extends Hexcrawl{
     const changed = this._merlinSettingsChanged(state);
     el.querySelector(".merlin-settings-undo").disabled = !changed && !state.recommended;
     el.querySelector(".merlin-settings-apply").disabled = !changed && !state.recommended;
+  }
+
+  // The weather window, while open: { element, data, level, pending, inFlight, refreshTimer }.
+  // Unlike the video settings, weather changes take effect straight away; there's nothing to apply or undo.
+  _merlinWeather = null;
+
+  _toggleMerlinWeather() {
+    if (this._merlinWeather) this._closeMerlinWeather();
+    else this._openMerlinWeather();
+  }
+
+  _closeMerlinWeather() {
+    const state = this._merlinWeather;
+    if (!state) return;
+    this._merlinWeather = null;
+    clearTimeout(state.refreshTimer);
+    state.element.remove();
+  }
+
+  async _fetchMerlinWeather(patch) {
+    const response = await fetch(`${this._merlinUrl}/weather`, patch === undefined
+      ? { signal: AbortSignal.timeout(5000) }
+      : { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(patch), signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async _openMerlinWeather() {
+    if (this._merlinWeather) return;
+    const state = this._merlinWeather = { element: this._buildMerlinWeatherWindow(), data: null, level: null, pending: null, inFlight: false, refreshTimer: null };
+    state.element.addEventListener("pointerdown", () => state.element.style.zIndex = 101);
+    document.body.appendChild(state.element);
+    this._refreshMerlinWeather(state);
+  }
+
+  // Reads what Merlin's weather controller offers. A level that is still opening has none yet, so keep asking for a few seconds.
+  async _refreshMerlinWeather(state, attempt = 0) {
+    clearTimeout(state.refreshTimer);
+    state.level = this._merlinCurrentLevel();
+    try {
+      state.data = await this._fetchMerlinWeather();
+    } catch (err) {
+      console.error("Merlin | Failed to read Merlin's weather:", err);
+      state.data = null;
+    }
+    if (this._merlinWeather !== state) return;
+    this._applyMerlinWeatherToWindow(state);
+    if (!state.data?.available && attempt < 8) {
+      state.refreshTimer = setTimeout(() => this._refreshMerlinWeather(state, attempt + 1), 1000);
+    }
+  }
+
+  _merlinCurrentLevel() {
+    const info = this.merlinInfo ?? {};
+    return info.loadingLevel || info.loadedLevel || "";
+  }
+
+  // Merlin has opened another level, which has its own weather settings
+  _onMerlinLevelMaybeChanged() {
+    const state = this._merlinWeather;
+    if (state && state.level !== this._merlinCurrentLevel()) this._refreshMerlinWeather(state);
+  }
+
+  // Changes made in quick succession (dragging a slider) are sent as one, one request at a time
+  _sendMerlinWeather(state, patch) {
+    state.pending = { ...state.pending, ...patch };
+    if (state.inFlight) return;
+    state.inFlight = true;
+    const flush = async () => {
+      while (state.pending && this._merlinWeather === state) {
+        const body = state.pending;
+        state.pending = null;
+        try {
+          const data = await this._fetchMerlinWeather(body);
+          // Only take up what Merlin says if nothing newer is waiting, or the slider would jump back while it's dragged
+          if (this._merlinWeather === state && !state.pending) {
+            state.data = data;
+            this._applyMerlinWeatherToWindow(state, { skipActive: true });
+          }
+        } catch (err) {
+          console.error("Merlin | Failed to change Merlin's weather:", err);
+          ui.notifications.warn("Couldn't change Merlin's weather.");
+        }
+      }
+      state.inFlight = false;
+    };
+    flush();
+  }
+
+  _buildMerlinWeatherWindow() {
+    const el = document.createElement("div");
+    el.id = "merlin-weather";
+    const row = (key, label) => `
+      <div class="merlin-settings-row" data-key="${key}">
+        <label>${label}</label>
+        <div class="merlin-settings-slider">
+          <input type="range" min="0" max="${MERLIN_WEATHER_STEPS[key]}" step="1">
+          <span class="merlin-settings-value"></span>
+        </div>
+      </div>`;
+    el.innerHTML = `
+      <header class="merlin-settings-header">
+        <span><i class="fa-solid fa-cloud-sun-rain"></i> Merlin Weather</span>
+        <a class="merlin-settings-close" data-tooltip="Close"><i class="fa-solid fa-xmark"></i></a>
+      </header>
+      <div class="merlin-settings-body">
+        ${row("timeOfDay", "Time of Day")}
+        ${row("rain", "Rain")}
+        ${row("windStrength", "Wind")}
+        <div class="merlin-weather-none" hidden>No weather settings are available for this level.</div>
+      </div>
+      <footer class="merlin-settings-footer">
+        <span class="merlin-settings-level"></span>
+      </footer>`;
+
+    el.querySelector(".merlin-settings-close").addEventListener("click", () => this._closeMerlinWeather());
+    this._makeMerlinSettingsDraggable(el, el.querySelector(".merlin-settings-header"));
+
+    for (const key of Object.keys(MERLIN_WEATHER_STEPS)) {
+      const input = el.querySelector(`.merlin-settings-row[data-key="${key}"] input`);
+      const send = () => {
+        const state = this._merlinWeather;
+        if (!state?.data) return;
+        // Merlin takes each of these as a fraction. The time of day goes with which way the slider moved: straight to the new
+        // time, never round midnight, as the slider has a start and an end.
+        this._sendMerlinWeather(state, {
+          [key]: Number(input.value) / MERLIN_WEATHER_STEPS[key],
+          ...(key === "timeOfDay" ? { timeOfDayDirection: "direct" } : {})
+        });
+      };
+      // The value shows while dragging, and Merlin follows (a few times a second) rather than waiting for the drop
+      let last = 0;
+      input.addEventListener("input", () => {
+        this._showMerlinWeatherValue(el, key, Number(input.value));
+        if (Date.now() - last < 150) return;
+        last = Date.now();
+        send();
+      });
+      input.addEventListener("change", send);
+    }
+    return el;
+  }
+
+  _showMerlinWeatherValue(el, key, position) {
+    const fraction = position / MERLIN_WEATHER_STEPS[key];
+    let text;
+    if (key === "timeOfDay") {
+      const minutes = Math.round(fraction * 24 * 60) % (24 * 60);
+      text = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    } else {
+      text = `${Math.round(fraction * 100)}%`;
+    }
+    el.querySelector(`.merlin-settings-row[data-key="${key}"] .merlin-settings-value`).textContent = text;
+  }
+
+  // Shows what Merlin says the weather is. Settings which are disabled in Merlin aren't shown. skipActive leaves alone
+  // the slider being dragged.
+  _applyMerlinWeatherToWindow(state, { skipActive = false } = {}) {
+    const el = state.element;
+    const data = state.data;
+    const available = !!data?.available;
+    const show = {
+      timeOfDay: available && data.timeOfDay.enabled,
+      rain: available && data.rain.enabled,
+      windStrength: available && data.wind.enabled
+    };
+    const values = available ? {
+      timeOfDay: data.timeOfDay.value,
+      rain: data.rain.value,
+      windStrength: data.wind.strength
+    } : {};
+    for (const key of Object.keys(MERLIN_WEATHER_STEPS)) {
+      const row = el.querySelector(`.merlin-settings-row[data-key="${key}"]`);
+      row.hidden = !show[key];
+      const input = row.querySelector("input");
+      if (show[key] && !(skipActive && document.activeElement === input)) {
+        input.value = Math.round(values[key] * MERLIN_WEATHER_STEPS[key]);
+        this._showMerlinWeatherValue(el, key, Number(input.value));
+      }
+    }
+    const none = el.querySelector(".merlin-weather-none");
+    none.hidden = Object.values(show).some(Boolean);
+    none.textContent = available ? "No weather settings are available for this level." : "Waiting for the level's weather...";
+    el.querySelector(".merlin-settings-level").textContent = `Level: ${this._merlinCurrentLevel() || "None"}`;
   }
 
   _makeMerlinSettingsDraggable(el, handle) {

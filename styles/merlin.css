@@ -254,3 +254,6 @@
 #merlin-weather [hidden] { display: none; }
 #merlin-weather .merlin-weather-none { padding: 8px 0; color: #aaa; }
 #merlin-weather .merlin-settings-value { flex: 0 0 82px; }
+
+/* Lighting buttons which Merlin controls while it displays the scene */
+#scene-controls-tools button.merlin-disabled { opacity: 0.35; pointer-events: auto; cursor: not-allowed; }

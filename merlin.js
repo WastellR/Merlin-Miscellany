@@ -27,6 +27,9 @@ const MERLIN_VIEW_WHOLE_FRACTION = 0.95;
 // The weather window's sliders, by the name Merlin knows them by, with how many steps each has
 const MERLIN_WEATHER_STEPS = { timeOfDay: 288, rain: 100, windStrength: 100 };
 
+// The buttons Merlin adds to the lighting controls which set the weather, temperature and time
+const MERLIN_LIGHTING_TOOLS = ["selectMerlinTime", "selectMerlinWeather", "selectMerlinWind", "selectMerlinTemperature"];
+
 // Value names for the levels of Merlin's video settings
 const MERLIN_QUALITY_LABELS = ["Low", "Medium", "High", "Epic", "Cinematic"];
 const MERLIN_OFF_QUALITY_LABELS = ["Off", "Low", "Medium", "High", "Epic", "Cinematic"];
@@ -155,6 +158,7 @@ class Merlin extends Hexcrawl{
     Hooks.on("hoverTile", this._onHoverTile.bind(this));
     Hooks.on("renderSettings", this._onRenderSettings.bind(this));
     Hooks.on("renderPlayers", () => this._positionMerlinStatusWidget());
+    Hooks.on("renderSceneControls", () => this._updateMerlinLightingControls());
     // Before Foundry destroys the scene's canvas: put its own background back on the mesh so that it is released with it
     Hooks.on("canvasTearDown", () => {
       this._restoreSceneBackground(false);
@@ -422,6 +426,7 @@ class Merlin extends Hexcrawl{
     try { stream.ps?.disconnect(); } catch (err) { console.warn("Merlin | Error closing Merlin video stream:", err); }
     stream.texture?.destroy?.(false);
     stream.parent?.remove();
+    this._updateMerlinSceneDisplayed();
   }
 
   // The mesh showing the current scene's (or level's) background image
@@ -909,6 +914,7 @@ class Merlin extends Hexcrawl{
     const label = document.querySelector("#merlin-connect-button span");
     if (label) label.textContent = this.merlinEnabled ? "Disconnect Merlin" : "Connect to Merlin";
     this._renderMerlinStatusWidget();
+    this._updateMerlinSceneDisplayed();
   }
 
   // The status icon beside the active players box, with extra detail once connected. Only exists while connecting/connected.
@@ -1788,6 +1794,7 @@ class Merlin extends Hexcrawl{
     this._originalBackground = null;
     this._merlinViewRequest = this._merlinAppliedView = null;
     this._applyMerlinStreamBackground();
+    this._updateMerlinSceneDisplayed();
     this._sendMerlinSceneUpdate();
     await this._ensureSceneStableIds(canvas.scene);
     this.overlays = [];
@@ -3145,22 +3152,8 @@ class Merlin extends Hexcrawl{
     return `${backgroundInfo.isVideo}_${backgroundInfo.rain}_${backgroundInfo.wind}_${backgroundInfo.time}`;
   }
 
-  async _updateBackground(backgroundInfo){
-    if(JSON.stringify(backgroundInfo) === JSON.stringify(this.currentBackgroundInfo)) return false;
-
-    // De/activate night and rain sounds if any
-    for(let sound of canvas.scene.sounds){
-      if(sound.flags?.merlin?.nightSound){
-        sound.update({hidden: backgroundInfo.time !== "night"});
-      }
-      if(sound.flags?.merlin?.rainSound){
-        sound.update({hidden: backgroundInfo?.rain == "none" || backgroundInfo?.rain == ""});
-      }
-      if(sound.flags?.merlin?.windSound){
-        sound.update({hidden: backgroundInfo?.wind == "none" || backgroundInfo?.wind == ""});
-      }
-    }
-
+  // Shows the rain overlays for the weather, and the temperature tint and overlays
+  _applyWeatherOverlays(backgroundInfo){
     // Update rain overlay, fallback to other rain type if needed
     this.clearOverlays();
     let newRainOverlays = [];
@@ -3187,6 +3180,74 @@ class Merlin extends Hexcrawl{
 
     // Temperature is applied locally by every client; it has its own layer so rain changes don't clear it
     this._applyTemperature(backgroundInfo.temperature ?? "normal");
+  }
+
+  // True while the scene being shown is one Merlin is displaying (puppet mode with a stream as the background), as
+  // opposed to a scene with no Merlin level, which keeps its own background. Merlin does its own weather and time there.
+  get _isMerlinSceneDisplayed(){
+    const flags = canvas?.scene?.flags?.merlin;
+    return !!(this.merlinEnabled && this.merlinStatus === "linked" && this.merlinStream && (flags?.merlinPackageId || flags?.merlinLevelId));
+  }
+
+  // Called when that may have changed: takes the overlays away, or puts them back
+  _updateMerlinSceneDisplayed(){
+    const displayed = this._isMerlinSceneDisplayed;
+    if(displayed !== this._merlinSceneDisplayed){
+      this._merlinSceneDisplayed = displayed;
+      if(canvas?.ready){
+        if(displayed){
+          this.clearOverlays();
+          this._temperatureApplyId++;
+          this._clearTemperature();
+        }
+        else if(this.currentBackgroundInfo?.rain !== undefined){
+          this._applyWeatherOverlays(this.currentBackgroundInfo);
+        }
+      }
+    }
+    this._updateMerlinLightingControls();
+  }
+  _merlinSceneDisplayed = false;
+
+  // The lighting section's weather, temperature and time buttons are disabled while Merlin's scene is displayed
+  _updateMerlinLightingControls(){
+    const displayed = this._isMerlinSceneDisplayed;
+    for(const name of MERLIN_LIGHTING_TOOLS){
+      const button = document.querySelector(`#scene-controls-tools button[data-tool="${name}"]`);
+      if(!button) continue;
+      if(displayed && !("merlinTooltip" in button.dataset)){
+        button.dataset.merlinTooltip = button.dataset.tooltip ?? "";
+      }
+      button.disabled = displayed;
+      button.classList.toggle("merlin-disabled", displayed);
+      if(displayed) button.dataset.tooltip = "Controlled by Merlin";
+      else if("merlinTooltip" in button.dataset){
+        button.dataset.tooltip = button.dataset.merlinTooltip;
+        delete button.dataset.merlinTooltip;
+      }
+    }
+  }
+
+  async _updateBackground(backgroundInfo){
+    if(JSON.stringify(backgroundInfo) === JSON.stringify(this.currentBackgroundInfo)) return false;
+
+    // De/activate night and rain sounds if any
+    for(let sound of canvas.scene.sounds){
+      if(sound.flags?.merlin?.nightSound){
+        sound.update({hidden: backgroundInfo.time !== "night"});
+      }
+      if(sound.flags?.merlin?.rainSound){
+        sound.update({hidden: backgroundInfo?.rain == "none" || backgroundInfo?.rain == ""});
+      }
+      if(sound.flags?.merlin?.windSound){
+        sound.update({hidden: backgroundInfo?.wind == "none" || backgroundInfo?.wind == ""});
+      }
+    }
+
+    // The overlays are Merlin's own weather; they're not wanted over a scene Merlin is displaying
+    if(!this._isMerlinSceneDisplayed){
+      this._applyWeatherOverlays(backgroundInfo);
+    }
 
     // Update background, fallback to nearby weather variants if needed
     let targetKey = this._getKeyFromBackgroundInfo(backgroundInfo);

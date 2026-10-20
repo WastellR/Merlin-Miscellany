@@ -152,6 +152,8 @@ class Merlin extends Hexcrawl{
     Hooks.on("hoverTile", this._onHoverTile.bind(this));
     Hooks.on("renderSettings", this._onRenderSettings.bind(this));
     Hooks.on("renderPlayers", () => this._positionMerlinStatusWidget());
+    // Before Foundry destroys the scene's canvas: put its own background back on the mesh so that it is released with it
+    Hooks.on("canvasTearDown", () => this._restoreSceneBackground(false));
 
     // Register fonts
     CONFIG.fontDefinitions["Jubilee Medium"] = {
@@ -454,6 +456,8 @@ class Merlin extends Hexcrawl{
     }
     if (!this._originalBackground || this._originalBackground.mesh !== mesh) {
       this._originalBackground = { mesh, texture: mesh.texture, visible: mesh.visible };
+      // If the scene's own background is a video, it is hidden behind the stream from here on, so don't have it decoding frames
+      this._setOriginalBackgroundPlaying(false);
     }
 
     mesh.texture = stream.texture;
@@ -697,13 +701,26 @@ class Merlin extends Hexcrawl{
     mesh.height = height * d.sceneHeight;
   }
 
-  _restoreSceneBackground() {
+  // Gives the scene back its own background. Foundry only knows about the texture its background mesh holds, so if the scene is
+  // torn down while the mesh holds the stream instead, the scene's own background (a video, which keeps playing and decoding
+  // until it is destroyed) is never released: one more of them is left playing in the page for every scene visited.
+  // resume is false when the scene is about to be destroyed anyway.
+  _restoreSceneBackground(resume = true) {
     const original = this._originalBackground;
     this._originalBackground = null;
     if (!original || original.mesh.destroyed) return;
     original.mesh.texture = original.texture;
     original.mesh.visible = original.visible;
     this._fitSceneBackgroundMesh(original.mesh);
+    if (resume) this._setOriginalBackgroundPlaying(true, original.texture);
+  }
+
+  // Pauses or resumes the scene's own background if it is a video
+  _setOriginalBackgroundPlaying(playing, texture = this._originalBackground?.texture) {
+    const video = game.video?.getVideoSource?.(texture);
+    if (!video) return;
+    if (playing) video.play()?.catch?.(() => {});
+    else video.pause();
   }
 
   // Tell Merlin about the new scene whenever the scene changes

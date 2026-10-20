@@ -153,7 +153,14 @@ class Merlin extends Hexcrawl{
     Hooks.on("renderSettings", this._onRenderSettings.bind(this));
     Hooks.on("renderPlayers", () => this._positionMerlinStatusWidget());
     // Before Foundry destroys the scene's canvas: put its own background back on the mesh so that it is released with it
-    Hooks.on("canvasTearDown", () => this._restoreSceneBackground(false));
+    Hooks.on("canvasTearDown", () => {
+      this._restoreSceneBackground(false);
+      // The weather and temperature overlays are children of the canvas that Foundry is about to destroy, which doesn't free their
+      // textures, so the videos among them would keep playing. Free them here.
+      this.#clearOverlays();
+      this._temperatureApplyId++;
+      this._clearTemperature();
+    });
 
     // Register fonts
     CONFIG.fontDefinitions["Jubilee Medium"] = {
@@ -3325,12 +3332,13 @@ class Merlin extends Hexcrawl{
       sprite.position.set(sceneX, sceneY);
       sprite.width = sceneWidth;
       sprite.height = sceneHeight;
+      sprite._merlinOwnsTexture = true;
       added.push(sprite);
     }
 
     // A newer call (or a scene change) has superseded this one while the files were loading
     if (applyId !== this._temperatureApplyId || !canvas.ready) {
-      for (const obj of added) obj.destroy({ children: true });
+      for (const obj of added) this._destroyOverlaySprite(obj);
       return;
     }
     for (const obj of added) {
@@ -3359,13 +3367,27 @@ class Merlin extends Hexcrawl{
     ui.controls.render({ reset: true });
   }
 
-  _clearTemperature() {
-    for (const obj of this.temperatureLayer) {
-      if (obj && !obj.destroyed) {
-        obj.parent?.removeChild(obj);
-        obj.destroy({ children: true });
-      }
+  // Destroys an overlay sprite along with what it shows. A sprite made from a file owns its texture, and if that is a video it
+  // keeps playing and decoding in the page until it is stopped and its texture destroyed. The temperature tint sprite instead
+  // uses PIXI's shared white texture, which must be left alone.
+  _destroyOverlaySprite(sprite) {
+    if (!sprite || sprite.destroyed) return;
+    sprite.parent?.removeChild(sprite);
+    if (!sprite._merlinOwnsTexture) {
+      sprite.destroy({ children: true });
+      return;
     }
+    const video = sprite.texture?.baseTexture?.resource?.source;
+    sprite.destroy({ children: true, texture: true, baseTexture: true });
+    if (video?.tagName === "VIDEO") {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+  }
+
+  _clearTemperature() {
+    for (const obj of this.temperatureLayer) this._destroyOverlaySprite(obj);
     this.temperatureLayer = [];
   }
 
@@ -3380,7 +3402,7 @@ class Merlin extends Hexcrawl{
 
   async #displayOverlays(filepaths) {
     while (this.bIsClearingOverlays) {
-        await new Promise(resolve => setTimeout(resolve, interval));
+        await new Promise(resolve => setTimeout(resolve, 50));
     }
     
     for(const filepath of filepaths){
@@ -3403,6 +3425,7 @@ class Merlin extends Hexcrawl{
           sprite = PIXI.Sprite.from(filepath);
       }
       if(!sprite) return;
+      sprite._merlinOwnsTexture = true;
 
       sprite.position.set(canvas.dimensions.sceneX, canvas.dimensions.sceneY);
       sprite.width = canvas.dimensions.sceneWidth;
@@ -3424,14 +3447,7 @@ class Merlin extends Hexcrawl{
   #clearOverlays(){
     this.bIsClearingOverlays = true;
     for(const overlay of this.overlays){
-      if(overlay){
-        canvas.interface.removeChild(overlay);
-        overlay.destroy({
-          children: true,
-          texture: true,
-          baseTexture: true
-        });
-      }
+      this._destroyOverlaySprite(overlay);
     }
     this.overlays = [];
     this.bIsClearingOverlays = false;

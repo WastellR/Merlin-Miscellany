@@ -1,5 +1,6 @@
 **Various utility functions used in Merlin's Maps.**
 
+- 'Connect to Merlin' mode, which allows us to stream realtime video from Merlin VTT (an Unreal Engine app using PixelStreaming) to Foundry's background. Video and weather settings in Merlin can be controlled from Foundry.
 - Custom inter-scene teleport
 - Control buttons for conveniently switching between scene background presets (e.g. Night, Rain, Video versions of the same scene background)
 - Fog masking using custom textures

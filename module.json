@@ -1,10 +1,10 @@
 {
   "id": "merlins-miscellany",
   "title": "Merlin's Miscellany",
-  "version": "1.0.0",
+  "version": "1.0.9",
   "compatibility": {
     "minimum": "13",
-    "verified": "13"
+    "verified": "14"
   },
   "description": "<div><p><span style=\"color:#ce9178\"><span style=\"color:#cccccc;background-color:#1f1f1f;font-family:Consolas, 'Courier New', monospace;font-weight:normal;font-size:14px;line-height:19px;white-space:pre\">Various utility functions used by Merlin's Maps.</span></span></p></div>",
   "authors": [
@@ -28,5 +28,5 @@
   },
 
   "manifest": "https://github.com/WastellR/Merlin-Miscellany/releases/latest/download/module.json",
-  "download": "https://github.com/WastellR/Merlin-Miscellany/releases/download/1.0.0/module.zip"
+  "download": "https://github.com/WastellR/Merlin-Miscellany/releases/download/1.0.9/module.zip"
 }
